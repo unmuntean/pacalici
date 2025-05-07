@@ -5,10 +5,39 @@ const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
-const io = socketIo(server);
+
+// Configure Socket.io with better options for mobile compatibility
+const io = socketIo(server, {
+  cors: {
+    origin: "*", // Allow all origins for development
+    methods: ["GET", "POST"]
+  },
+  transports: ['websocket', 'polling'], // Enable both transport methods
+  pingTimeout: 30000,                   // Longer ping timeout for mobile
+  pingInterval: 25000,                  // Longer ping interval
+  connectTimeout: 20000                 // Longer connection timeout
+});
+
+// Middleware to handle potential network issues
+app.use((req, res, next) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  next();
+});
 
 // Serve static files
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Add a health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).send('OK');
+});
+
+// Serve the main game page
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 // Game state
 const games = {};
@@ -830,7 +859,13 @@ function checkGameEnd(game, roomId) {
 }
 
 const PORT = process.env.PORT || 8080;
+const HOST = process.env.HOST || '0.0.0.0'; // Listen on all available network interfaces
 
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+server.listen(PORT, HOST, (err) => {
+  if (err) {
+    console.error('Error starting server:', err);
+    return;
+  }
+  console.log(`Server is running on http://localhost:${PORT}`);
+  console.log(`Listening on all interfaces (${HOST}:${PORT})`);
 }); 

@@ -203,18 +203,124 @@ function preloadCardImages() {
 
 // Initialize the game
 function initGame() {
-  // Connect to the server
-  gameState.socket = io();
+  // Show loading message
+  showConnectingMessage();
   
-  // Check image loading
-  preloadCardImages();
+  // Connect to the server with better options for mobile compatibility
+  gameState.socket = io({
+    transports: ['websocket', 'polling'],  // Try WebSocket first, fallback to polling
+    reconnectionAttempts: 5,               // Try to reconnect 5 times
+    reconnectionDelay: 1000,               // Start with 1s delay
+    reconnectionDelayMax: 5000,            // Maximum 5s delay
+    timeout: 20000                         // 20s connection timeout
+  });
   
-  // Set up event listeners
+  // Add connection event listeners
+  gameState.socket.on('connect', () => {
+    console.log('[Socket] Connected successfully');
+    hideConnectingMessage();
+    
+    // Check image loading
+    preloadCardImages();
+    
+    // Show login screen
+    showScreen('login');
+  });
+  
+  gameState.socket.on('connect_error', (error) => {
+    console.error('[Socket] Connection error:', error);
+    showConnectionError('Nu s-a putut conecta la server. Verifică conexiunea la internet și încearcă din nou.');
+  });
+  
+  gameState.socket.on('disconnect', (reason) => {
+    console.log('[Socket] Disconnected:', reason);
+    if (reason === 'io server disconnect') {
+      // Server forced disconnect
+      showConnectionError('Conexiunea cu serverul a fost întreruptă. Reîncărcați pagina pentru a încerca din nou.');
+    } else {
+      // Trying to reconnect automatically
+      showConnectingMessage('Reconectare...');
+    }
+  });
+  
+  gameState.socket.on('reconnect', (attemptNumber) => {
+    console.log('[Socket] Reconnected after', attemptNumber, 'attempts');
+    hideConnectingMessage();
+    // No need to refresh - just continue where we left off
+  });
+  
+  gameState.socket.on('reconnect_failed', () => {
+    console.error('[Socket] Failed to reconnect after multiple attempts');
+    showConnectionError('Reconectarea la server a eșuat. Reîncărcați pagina pentru a încerca din nou.');
+  });
+  
+  // Set up other event listeners
   setupSocketListeners();
   setupUIListeners();
+}
+
+// Add utility functions for connection messaging
+function showConnectingMessage(message = 'Conectare la server...') {
+  // Create or get connecting overlay
+  let overlay = document.getElementById('connecting-overlay');
   
-  // Show login screen
-  showScreen('login');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'connecting-overlay';
+    overlay.className = 'fixed inset-0 bg-gray-900 bg-opacity-90 flex items-center justify-center z-50';
+    
+    const content = document.createElement('div');
+    content.className = 'bg-gray-800 p-6 rounded-lg shadow-lg text-center';
+    content.innerHTML = `
+      <div class="loading-spinner mb-4"></div>
+      <p id="connecting-message" class="text-white text-lg"></p>
+    `;
+    
+    overlay.appendChild(content);
+    document.body.appendChild(overlay);
+  }
+  
+  // Update message
+  document.getElementById('connecting-message').textContent = message;
+  overlay.style.display = 'flex';
+}
+
+function hideConnectingMessage() {
+  const overlay = document.getElementById('connecting-overlay');
+  if (overlay) {
+    overlay.style.display = 'none';
+  }
+}
+
+function showConnectionError(message) {
+  // Create or get connecting overlay
+  let overlay = document.getElementById('connecting-overlay');
+  
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'connecting-overlay';
+    overlay.className = 'fixed inset-0 bg-gray-900 bg-opacity-90 flex items-center justify-center z-50';
+    document.body.appendChild(overlay);
+  }
+  
+  // Update with error content
+  overlay.innerHTML = `
+    <div class="bg-gray-800 p-6 rounded-lg shadow-lg text-center max-w-md">
+      <div class="text-red-500 text-5xl mb-4">⚠️</div>
+      <h2 class="text-white text-xl font-bold mb-2">Eroare de conexiune</h2>
+      <p class="text-white mb-4">${message}</p>
+      <button id="retry-connection" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">
+        Reîncărcați pagina
+      </button>
+    </div>
+  `;
+  
+  // Add reload button functionality
+  document.getElementById('retry-connection').addEventListener('click', () => {
+    window.location.reload();
+  });
+  
+  overlay.style.display = 'flex';
 }
 
 // Set up Socket.IO event listeners
