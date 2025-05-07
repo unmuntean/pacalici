@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Joc Păcălici - Multiplayer</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <header class="mb-8 text-center">
+            <h1 class="text-4xl font-bold text-indigo-700 mb-2">Joc Păcălici</h1>
+            <p class="text-gray-600">Jocul clasic românesc, acum multiplayer online!</p>
+        </header>
+
+        <!-- Login Screen -->
+        <div id="login-screen" class="max-w-md mx-auto bg-white rounded-lg shadow-md p-6">
+            <h2 class="text-2xl font-semibold text-center mb-4">Începe jocul</h2>
+            <div class="mb-4">
+                <label for="username" class="block text-gray-700 mb-2">Numele tău:</label>
+                <input type="text" id="username" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Introdu numele tău">
+            </div>
+            <div class="flex flex-col space-y-3">
+                <button id="create-game-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">Creează un joc nou</button>
+                <div class="relative">
+                    <div class="absolute inset-0 flex items-center">
+                        <div class="w-full border-t border-gray-300"></div>
+                    </div>
+                    <div class="relative flex justify-center text-sm">
+                        <span class="px-2 bg-white text-gray-500">sau</span>
+                    </div>
+                </div>
+                <div class="flex space-x-2">
+                    <input type="text" id="room-id" class="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Cod cameră">
+                    <button id="join-game-btn" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500">Intră</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Waiting Room -->
+        <div id="waiting-room" class="max-w-md mx-auto bg-white rounded-lg shadow-md p-6 hidden">
+            <h2 class="text-2xl font-semibold text-center mb-4">Așteptare jucători</h2>
+            <div class="mb-4 text-center">
+                <p>Codul camerei: <span id="room-code" class="font-mono font-bold text-lg"></span></p>
+                <p class="text-sm text-gray-500">Trimite acest cod prietenilor tăi pentru a se alătura!</p>
+            </div>
+            <div class="mb-4">
+                <h3 class="font-semibold mb-2">Jucători conectați:</h3>
+                <ul id="players-list" class="space-y-2"></ul>
+            </div>
+            <button id="start-game-btn" class="w-full bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">Începe jocul</button>
+            <p id="waiting-message" class="mt-2 text-sm text-gray-500 text-center">Ai nevoie de cel puțin 2 jucători pentru a începe</p>
+        </div>
+
+        <!-- Game Board -->
+        <div id="game-board" class="hidden">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div class="col-span-1">
+                    <div class="bg-white rounded-lg shadow-md p-4">
+                        <h2 class="text-lg font-semibold mb-2">Jucători</h2>
+                        <ul id="game-players-list" class="space-y-2"></ul>
+                    </div>
+                    <div class="bg-white rounded-lg shadow-md p-4 mt-4">
+                        <h2 class="text-lg font-semibold mb-2">Informații joc</h2>
+                        <p>Cărți rămase în pachet: <span id="deck-count" class="font-semibold">29</span></p>
+                        <div id="turn-info" class="mt-2 p-2 bg-yellow-100 rounded">
+                            <p>Este rândul lui: <span id="current-player" class="font-semibold"></span></p>
+                        </div>
+                        <div id="action-buttons" class="mt-4 space-y-2 hidden">
+                            <button id="draw-card-btn" class="w-full bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700">Trage o carte</button>
+                            <button id="end-turn-btn" class="w-full bg-gray-500 text-white px-3 py-1.5 rounded hover:bg-gray-600">Termină tura</button>
+                            <button id="simulate-empty-deck-btn" class="w-full mt-4 bg-purple-600 text-white px-3 py-1.5 rounded hover:bg-purple-700 text-sm">Simulează pachet gol</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-span-1 lg:col-span-2">
+                    <div class="bg-white rounded-lg shadow-md p-4">
+                        <h2 class="text-lg font-semibold mb-2">Cărțile tale</h2>
+                        <div id="player-cards" class="grid grid-cols-2 sm:grid-cols-4 gap-4"></div>
+                    </div>
+                    <div class="bg-white rounded-lg shadow-md p-4 mt-4">
+                        <h2 class="text-lg font-semibold mb-2">Perechi formate</h2>
+                        <div id="pairs-container" class="grid grid-cols-2 sm:grid-cols-4 gap-4"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Game Over Screen -->
+        <div id="game-over" class="max-w-md mx-auto bg-white rounded-lg shadow-md p-6 hidden">
+            <h2 class="text-2xl font-semibold text-center mb-4">Joc terminat!</h2>
+            <div id="winner-info" class="text-center mb-4">
+                <div class="mb-2">
+                    <span class="inline-block bg-yellow-400 text-yellow-800 px-2 py-1 rounded text-sm font-semibold">Câștigător</span>
+                </div>
+                <p class="text-xl font-bold" id="winner-name"></p>
+            </div>
+            <div id="loser-info" class="text-center mb-6">
+                <div class="mb-2">
+                    <span class="inline-block bg-gray-200 text-gray-800 px-2 py-1 rounded text-sm font-semibold">Păcălit</span>
+                </div>
+                <p class="text-lg" id="loser-name"></p>
+                <p class="text-sm text-gray-500">A rămas cu Păcăliciul!</p>
+            </div>
+            <button id="new-game-btn" class="w-full bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">Joc nou</button>
+        </div>
+
+        <!-- Notifications -->
+        <div id="notification" class="fixed top-4 right-4 max-w-xs bg-white border-l-4 border-green-500 rounded-md shadow-md p-4 transform transition-transform duration-300 translate-x-full">
+            <div class="flex">
+                <div class="flex-shrink-0">
+                    <svg class="h-5 w-5 text-green-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.707a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                    </svg>
+                </div>
+                <div class="ml-3">
+                    <p id="notification-text" class="text-sm text-gray-700"></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Rules Modal -->
+    <div id="rules-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50">
+        <div class="bg-white rounded-lg shadow-xl p-6 max-w-2xl mx-4 max-h-screen overflow-y-auto">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-2xl font-bold text-gray-800">Reguli Joc Păcălici</h2>
+                <button id="close-rules" class="text-gray-500 hover:text-gray-700 focus:outline-none">
+                    <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div class="text-gray-700 space-y-4">
+                <p>Joc Păcălici este un joc de cărți românesc tradițional în care scopul este să formezi perechi și să rămâi fără cărți.</p>
+                
+                <h3 class="text-lg font-semibold">Componente</h3>
+                <p>Pachetul conține 33 de cărți:</p>
+                <ul class="list-disc ml-5">
+                    <li>16 perechi (băiat-fată) de același tip (ex: cioban, marinar, calusar)</li>
+                    <li>1 carte specială: Păcăliciul</li>
+                </ul>
+                
+                <h3 class="text-lg font-semibold">Desfășurarea jocului</h3>
+                <ol class="list-decimal ml-5">
+                    <li>Fiecare jucător primește 4 cărți.</li>
+                    <li>În tura ta, dacă ai o pereche (băiat-fată din aceeași categorie), o depui pe masă.</li>
+                    <li>După ce ai format perechi (dacă e cazul), tragi o carte nouă din pachet.</li>
+                    <li>Dacă ai format din nou perechi, le depui pe masă.</li>
+                    <li>Când se termină pachetul, jucătorii vor trage cărți de la cel din dreapta.</li>
+                    <li>Câștigătorul este primul jucător care rămâne fără cărți.</li>
+                    <li>Pierzătorul este cel care rămâne cu cartea Păcălici.</li>
+                </ol>
+                
+                <h3 class="text-lg font-semibold">Sfaturi</h3>
+                <ul class="list-disc ml-5">
+                    <li>Încearcă să memorezi cărțile celorlalți jucători.</li>
+                    <li>Dacă ai Păcăliciul, încearcă să scapi de el cât mai rapid.</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <button id="show-rules" class="fixed bottom-4 right-4 bg-indigo-600 text-white p-2 rounded-full shadow-lg hover:bg-indigo-700 focus:outline-none">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+    </button>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="js/game.js"></script>
+</body>
+</html> 

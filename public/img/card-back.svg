@@ -1,0 +1,22 @@
+<svg width="200" height="300" viewBox="0 0 200 300" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background pattern -->
+  <rect width="200" height="300" fill="#4a5568" />
+  
+  <!-- Decorative border -->
+  <rect x="10" y="10" width="180" height="280" fill="none" stroke="#fbd38d" stroke-width="3" />
+  
+  <!-- Center pattern -->
+  <circle cx="100" cy="150" r="50" fill="none" stroke="#fbd38d" stroke-width="2" />
+  
+  <!-- Star pattern -->
+  <path d="M100,100 L120,150 L100,200 L80,150 Z" fill="#fbd38d" />
+  
+  <!-- Text "Păcălici" -->
+  <text x="100" y="80" font-family="Arial, sans-serif" font-size="18" text-anchor="middle" fill="#fbd38d">Păcălici</text>
+  
+  <!-- Corner decorations -->
+  <circle cx="30" cy="30" r="12" fill="#fbd38d" />
+  <circle cx="170" cy="30" r="12" fill="#fbd38d" />
+  <circle cx="30" cy="270" r="12" fill="#fbd38d" />
+  <circle cx="170" cy="270" r="12" fill="#fbd38d" />
+</svg> 
