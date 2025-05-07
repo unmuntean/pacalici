@@ -10,7 +10,9 @@ const gameState = {
   myCards: [],
   myPairs: [],
   deckCount: 0,
-  isMyTurn: false
+  isMyTurn: false,
+  isDeckEmpty: false,
+  selectedPlayerForDraw: null,
 };
 
 // DOM elements
@@ -143,7 +145,7 @@ function setupSocketListeners() {
   });
   
   // Game started
-  socket.on('gameStarted', ({ currentTurn, deckCount }) => {
+  socket.on('gameStarted', ({ currentTurn, deckCount, playersInfo }) => {
     gameState.currentTurn = currentTurn;
     gameState.deckCount = deckCount;
     
@@ -151,6 +153,16 @@ function setupSocketListeners() {
     gameState.selectedCards = [];
     gameState.myCards = [];
     gameState.myPairs = [];
+    
+    // Update players with card counts
+    if (playersInfo) {
+      playersInfo.forEach(playerInfo => {
+        const player = gameState.players.find(p => p.id === playerInfo.id);
+        if (player) {
+          player.cards = playerInfo.cards;
+        }
+      });
+    }
     
     // Show game board
     showScreen('gameBoard');
@@ -202,6 +214,10 @@ function setupSocketListeners() {
     
     if (fromPlayer) {
       showNotification(`Ai tras o carte de la ${fromPlayer}`);
+      // Reset selected player
+      gameState.selectedPlayerForDraw = null;
+      // Re-render other players' cards
+      renderOtherPlayersCards();
     } else {
       showNotification('Ai tras o carte din pachet');
       
@@ -214,6 +230,9 @@ function setupSocketListeners() {
   // Card taken from you
   socket.on('cardTaken', ({ byPlayer, cardCount }) => {
     showNotification(`${byPlayer} a luat o carte de la tine`);
+    
+    // Re-render your cards
+    renderPlayerCards();
   });
   
   // Player drew from another player
@@ -256,10 +275,17 @@ function setupSocketListeners() {
         renderPlayerCards();
       } else {
         showNotification(`${player.username} a format o pereche`);
+        // Update the display of the other player's pairs
+        renderAllPlayersPairs();
       }
       
       // Update game players list
       updateGamePlayersList();
+      
+      // Re-render other players' cards if deck is empty
+      if (gameState.isDeckEmpty) {
+        renderOtherPlayersCards();
+      }
     }
   });
   
@@ -291,8 +317,26 @@ function setupSocketListeners() {
     elements.gameBoard.deckCount.textContent = deckCount;
     
     // Update UI to show the drawing from other players if deck is empty
-    if (deckCount === 0) {
+    if (deckCount === 0 && !gameState.isDeckEmpty) {
+      gameState.isDeckEmpty = true;
       showNotification('Pachetul de cărți este gol! Acum tragi cărți de la alți jucători.');
+      renderOtherPlayersCards();
+    }
+  });
+  
+  // Add an event handler for players' card counts
+  socket.on('playersCardsCount', ({ playersInfo }) => {
+    // Update players with card counts
+    playersInfo.forEach(playerInfo => {
+      const player = gameState.players.find(p => p.id === playerInfo.id);
+      if (player) {
+        player.cards = playerInfo.cards;
+      }
+    });
+    
+    // If deck is empty, update the other players' cards UI
+    if (gameState.isDeckEmpty) {
+      renderOtherPlayersCards();
     }
   });
   
@@ -337,7 +381,15 @@ function setupUIListeners() {
   // Draw card button
   elements.gameBoard.drawCardBtn.addEventListener('click', () => {
     if (gameState.isMyTurn) {
-      gameState.socket.emit('drawCard');
+      if (gameState.isDeckEmpty && gameState.selectedPlayerForDraw) {
+        // If deck is empty and a player is selected, draw from that player
+        gameState.socket.emit('drawFromPlayer', {
+          fromPlayerId: gameState.selectedPlayerForDraw
+        });
+      } else {
+        // Normal draw from deck
+        gameState.socket.emit('drawCard');
+      }
     }
   });
   
@@ -483,8 +535,21 @@ function checkTurn() {
   // Show/hide action buttons
   if (gameState.isMyTurn) {
     elements.gameBoard.actionButtons.classList.remove('hidden');
+    
+    // Update draw card button text based on deck state
+    if (gameState.isDeckEmpty) {
+      elements.gameBoard.drawCardBtn.textContent = gameState.selectedPlayerForDraw ? 
+        'Trage o carte selectată' : 'Selectează o carte de la un jucător';
+    } else {
+      elements.gameBoard.drawCardBtn.textContent = 'Trage o carte';
+    }
   } else {
     elements.gameBoard.actionButtons.classList.add('hidden');
+  }
+  
+  // Update the other players' cards UI if deck is empty
+  if (gameState.isDeckEmpty) {
+    renderOtherPlayersCards();
   }
 }
 
@@ -573,7 +638,7 @@ function renderPairs() {
   // Add each pair
   gameState.myPairs.forEach(pair => {
     const pairElement = document.createElement('div');
-    pairElement.classList.add('flex', 'space-x-1');
+    pairElement.classList.add('flex', 'space-x-1', 'mb-2', 'p-2', 'bg-green-50', 'rounded-md');
     
     // Create elements for each card in the pair
     pair.forEach(card => {
@@ -647,6 +712,188 @@ function formatCardType(type) {
   if (type === 'girl') return 'Fată';
   if (type === 'trickster') return 'Păcălici';
   return type;
+}
+
+// Add a new function to render other players' cards when the deck is empty
+function renderOtherPlayersCards() {
+  // Only show other players' cards if the deck is empty
+  if (!gameState.isDeckEmpty) return;
+  
+  // Create or update the container for other players' cards
+  let otherPlayersContainer = document.getElementById('other-players-cards');
+  
+  if (!otherPlayersContainer) {
+    otherPlayersContainer = document.createElement('div');
+    otherPlayersContainer.id = 'other-players-cards';
+    otherPlayersContainer.className = 'mt-6';
+    
+    const heading = document.createElement('h2');
+    heading.className = 'text-lg font-semibold mb-2';
+    heading.textContent = 'Cărțile altor jucători';
+    
+    otherPlayersContainer.appendChild(heading);
+    
+    // Insert after your cards
+    elements.gameBoard.playerCards.parentNode.after(otherPlayersContainer);
+  }
+  
+  // Clear the container
+  while (otherPlayersContainer.childNodes.length > 1) {
+    otherPlayersContainer.removeChild(otherPlayersContainer.lastChild);
+  }
+  
+  // Get other players (players other than yourself)
+  const otherPlayers = gameState.players.filter(p => p.id !== gameState.playerId);
+  
+  // Create a section for each player
+  otherPlayers.forEach(player => {
+    // Skip players with no cards
+    if (player.cards && player.cards.length === 0) return;
+    
+    const playerSection = document.createElement('div');
+    playerSection.className = 'mb-4';
+    
+    const playerName = document.createElement('h3');
+    playerName.className = 'text-md font-medium mb-1';
+    playerName.textContent = `${player.username} - ${player.cards} cărți`;
+    
+    playerSection.appendChild(playerName);
+    
+    // Create a grid for the cards
+    const cardsGrid = document.createElement('div');
+    cardsGrid.className = 'grid grid-cols-5 gap-2';
+    
+    // Create card backs for this player
+    for (let i = 0; i < player.cards; i++) {
+      const cardBack = document.createElement('div');
+      cardBack.className = 'card-back h-16 rounded-md cursor-pointer transform transition-transform hover:scale-105';
+      
+      // Add click handler to select this player for drawing
+      cardBack.addEventListener('click', () => {
+        if (gameState.isMyTurn) {
+          // Set the selected player
+          gameState.selectedPlayerForDraw = player.id;
+          
+          // Update UI to show which player is selected
+          document.querySelectorAll('.card-back').forEach(card => {
+            card.classList.remove('ring-2', 'ring-blue-500');
+          });
+          
+          cardBack.classList.add('ring-2', 'ring-blue-500');
+          
+          showNotification(`Selectat pentru a trage o carte de la ${player.username}`);
+        }
+      });
+      
+      // Add selected style if this player is already selected
+      if (player.id === gameState.selectedPlayerForDraw) {
+        cardBack.classList.add('ring-2', 'ring-blue-500');
+      }
+      
+      cardsGrid.appendChild(cardBack);
+    }
+    
+    playerSection.appendChild(cardsGrid);
+    otherPlayersContainer.appendChild(playerSection);
+  });
+}
+
+// Add a new function to render all players' pairs
+function renderAllPlayersPairs() {
+  // Get the container for all players' pairs
+  let allPairsContainer = document.getElementById('all-players-pairs');
+  
+  // Create the container if it doesn't exist
+  if (!allPairsContainer) {
+    allPairsContainer = document.createElement('div');
+    allPairsContainer.id = 'all-players-pairs';
+    allPairsContainer.className = 'bg-white rounded-lg shadow-md p-4 mt-4';
+    
+    const heading = document.createElement('h2');
+    heading.className = 'text-lg font-semibold mb-2';
+    heading.textContent = 'Perechi formate de toți jucătorii';
+    
+    allPairsContainer.appendChild(heading);
+    
+    // Insert after the pairs container
+    elements.gameBoard.pairsContainer.parentNode.after(allPairsContainer);
+  }
+  
+  // Clear existing content except the heading
+  while (allPairsContainer.childNodes.length > 1) {
+    allPairsContainer.removeChild(allPairsContainer.lastChild);
+  }
+  
+  // Create a section for each player's pairs
+  gameState.players.forEach(player => {
+    if (player.pairs > 0) {
+      const playerSection = document.createElement('div');
+      playerSection.className = 'mb-3 pb-2 border-b border-gray-200';
+      
+      const playerName = document.createElement('h3');
+      playerName.className = 'text-md font-medium mb-1';
+      playerName.textContent = `${player.username} - ${player.pairs} perechi`;
+      
+      playerSection.appendChild(playerName);
+      
+      // If it's the current player, we have the actual pairs data
+      if (player.id === gameState.playerId) {
+        // Add a visual representation of the pairs
+        const pairsContainer = document.createElement('div');
+        pairsContainer.className = 'grid grid-cols-2 sm:grid-cols-3 gap-2';
+        
+        gameState.myPairs.forEach(pair => {
+          const pairElement = document.createElement('div');
+          pairElement.className = 'bg-green-50 p-1 rounded-md flex space-x-1';
+          
+          pair.forEach(card => {
+            const cardElement = document.createElement('div');
+            cardElement.className = 'w-1/2';
+            
+            // Get icon for card
+            const icon = cardIcons[card.name] || '❓';
+            
+            cardElement.innerHTML = `
+              <div class="h-10 flex items-center justify-center flex-col rounded-md bg-white">
+                <div class="text-sm">${icon}</div>
+                <div class="text-xs">${formatCardName(card.name)}</div>
+              </div>
+            `;
+            
+            pairElement.appendChild(cardElement);
+          });
+          
+          pairsContainer.appendChild(pairElement);
+        });
+        
+        playerSection.appendChild(pairsContainer);
+      } else {
+        // For other players, we just show the number of pairs
+        const pairsDisplay = document.createElement('div');
+        pairsDisplay.className = 'flex flex-wrap gap-2';
+        
+        // Create a simple representation for each pair
+        for (let i = 0; i < player.pairs; i++) {
+          const pairSymbol = document.createElement('div');
+          pairSymbol.className = 'bg-green-50 p-1 rounded-md flex items-center justify-center w-12 h-8';
+          pairSymbol.textContent = '👥';
+          pairsDisplay.appendChild(pairSymbol);
+        }
+        
+        playerSection.appendChild(pairsDisplay);
+      }
+      
+      allPairsContainer.appendChild(playerSection);
+    }
+  });
+  
+  // Add a message if no pairs have been formed
+  if (allPairsContainer.childNodes.length <= 1) {
+    const message = document.createElement('p');
+    message.className = 'text-center text-gray-500 py-2';
+    message.textContent = 'Niciun jucător nu a format perechi încă.';
+    allPairsContainer.appendChild(message);
+  }
 }
 
 // Initialize the game when the page loads

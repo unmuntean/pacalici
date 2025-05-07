@@ -112,10 +112,18 @@ io.on('connection', (socket) => {
     // Deal cards
     const remainingCards = dealCards(game);
     
+    // Get player info with card counts
+    const playersInfo = game.players.map(p => ({
+      id: p.id,
+      username: p.username,
+      cards: p.cards.length
+    }));
+    
     // Notify all players that the game has started
     io.to(roomId).emit('gameStarted', {
       currentTurn: game.players[game.currentTurn].id,
-      deckCount: remainingCards
+      deckCount: remainingCards,
+      playersInfo
     });
     
     // Send each player their cards
@@ -258,6 +266,15 @@ io.on('connection', (socket) => {
         
         console.log(`Player ${game.players[playerIndex].username} drew a card from ${rightPlayer.username}`);
       }
+      
+      // Send information about other players' cards to all players
+      const playersInfo = game.players.map(p => ({
+        id: p.id,
+        username: p.username,
+        cards: p.cards.length
+      }));
+      
+      io.to(roomId).emit('playersCardsCount', { playersInfo });
     }
     
     // End turn
@@ -355,6 +372,69 @@ io.on('connection', (socket) => {
     });
     
     console.log(`Empty deck simulation triggered in game ${roomId}`);
+  });
+
+  // Add a new event handler for drawing a card directly from another player
+  socket.on('drawFromPlayer', ({ fromPlayerId }) => {
+    const roomId = userRooms[socket.id];
+    if (!roomId || !games[roomId]) return;
+    
+    const game = games[roomId];
+    
+    // Check if it's the player's turn
+    const playerIndex = game.players.findIndex(p => p.id === socket.id);
+    if (playerIndex === -1 || game.currentTurn !== playerIndex) {
+      socket.emit('error', 'Not your turn');
+      return;
+    }
+    
+    // Check if deck is empty (should be, but verify)
+    if (game.deck.length > 0) {
+      socket.emit('error', 'Deck is not empty yet');
+      return;
+    }
+    
+    // Find the player to draw from
+    const fromPlayerIndex = game.players.findIndex(p => p.id === fromPlayerId);
+    if (fromPlayerIndex === -1) {
+      socket.emit('error', 'Player not found');
+      return;
+    }
+    
+    const fromPlayer = game.players[fromPlayerIndex];
+    
+    // Check if the player has cards
+    if (fromPlayer.cards.length === 0) {
+      socket.emit('error', 'This player has no cards');
+      return;
+    }
+    
+    // Select a random card from the player
+    const randomIndex = Math.floor(Math.random() * fromPlayer.cards.length);
+    const card = fromPlayer.cards.splice(randomIndex, 1)[0];
+    
+    // Add the card to the current player's hand
+    game.players[playerIndex].cards.push(card);
+    
+    // Notify the current player of their new card
+    socket.emit('cardDrawn', { card, fromPlayer: fromPlayer.username });
+    
+    // Notify the player that a card was taken
+    io.to(fromPlayerId).emit('cardTaken', {
+      byPlayer: game.players[playerIndex].username,
+      cardCount: fromPlayer.cards.length
+    });
+    
+    // Notify other players
+    io.to(roomId).emit('playerDrawFromPlayer', {
+      playerId: socket.id,
+      fromPlayerId: fromPlayer.id
+    });
+    
+    console.log(`Player ${game.players[playerIndex].username} drew a card from ${fromPlayer.username}`);
+    
+    // End turn
+    endTurn(game, roomId);
   });
 });
 
