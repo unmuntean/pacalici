@@ -56,13 +56,14 @@ io.on('connection', (socket) => {
         id: socket.id,
         username: username,
         cards: [],
-        pairs: 0
+        pairs: 0,
+        finished: false  // New: track if player has finished all their cards
       }],
       deck: [],
       status: 'waiting',
       currentTurn: 0,
-      winner: null,
-      loser: null
+      winners: [],     // New: multiple winners in the order they finish
+      loser: null      // Final player with Păcălici
     };
     
     // Associate this socket with the room
@@ -98,7 +99,8 @@ io.on('connection', (socket) => {
       id: socket.id,
       username: username,
       cards: [],
-      pairs: 0
+      pairs: 0,
+      finished: false  // New: track if player has finished all their cards
     });
     
     userRooms[socket.id] = roomId;
@@ -181,6 +183,12 @@ io.on('connection', (socket) => {
     
     const player = game.players[playerIndex];
     
+    // Check if player already finished
+    if (player.finished) {
+      socket.emit('error', 'You have already finished your cards');
+      return;
+    }
+    
     // Log received cards
     console.log(`[Server] Pair declaration received from ${player.username}:`, card1, card2);
     
@@ -211,31 +219,40 @@ io.on('connection', (socket) => {
       // Increase pair count
       player.pairs += 1;
       
+      // Check if the player has finished their cards
+      const hasFinished = (player.cards.length === 0);
+      
+      // If player is finished, mark them as a winner
+      if (hasFinished) {
+        player.finished = true;
+        
+        // Add to winners list if not already a winner
+        if (!game.winners.includes(player.id)) {
+          game.winners.push(player.id);
+        }
+        
+        console.log(`Player ${player.username} has finished all their cards and is out of the game!`);
+      }
+      
       // Notify all players about the pair
       io.to(roomId).emit('pairDeclared', {
         playerId: socket.id,
         cards: removedCards,
         remainingCardCount: player.cards.length,
-        pairs: player.pairs
+        pairs: player.pairs,
+        hasFinished: hasFinished
       });
       
-      // Check if the player has won (no more cards)
-      if (player.cards.length === 0) {
-        if (game.deck.length > 0) {
-          // Draw a card if there are still cards in the deck
-          drawCard(game, playerIndex);
-          
-          // Broadcast updated deck count to all players
-          io.to(roomId).emit('deckCountUpdated', {
-            deckCount: game.deck.length
-          });
-        } else {
-          // Check if the game is over
-          checkGameEnd(game, roomId);
-        }
+      console.log(`Player ${player.username} declared a pair. Cards left: ${player.cards.length}`);
+      
+      // Check if we should end the turn and move to next player
+      if (hasFinished || (player.cards.length > 0 && game.deck.length === 0)) {
+        // End turn and pass to next active player
+        endTurn(game, roomId);
       }
       
-      console.log(`Player ${player.username} declared a pair`);
+      // Check if the game is over (only one player left with cards)
+      checkGameEnd(game, roomId);
     } else {
       socket.emit('error', 'Invalid pair');
     }
@@ -255,6 +272,14 @@ io.on('connection', (socket) => {
       return;
     }
     
+    const player = game.players[playerIndex];
+    
+    // Check if player already finished
+    if (player.finished) {
+      socket.emit('error', 'You have already finished your cards');
+      return;
+    }
+    
     if (game.deck.length > 0) {
       // Draw from deck
       const card = drawCard(game, playerIndex);
@@ -265,7 +290,7 @@ io.on('connection', (socket) => {
       // Notify other players that this player drew a card
       socket.to(roomId).emit('playerDrewCard', {
         playerId: socket.id,
-        cardCount: game.players[playerIndex].cards.length
+        cardCount: player.cards.length
       });
       
       // Broadcast updated deck count to all players
@@ -273,68 +298,14 @@ io.on('connection', (socket) => {
         deckCount: game.deck.length
       });
       
-      console.log(`Player ${game.players[playerIndex].username} drew a card, deck remaining: ${game.deck.length}`);
-    } else if (game.players.length > 2) {
-      // If there are no more cards in the deck and more than 2 players,
-      // draw from the player to the right
-      const rightPlayerIndex = (playerIndex + 1) % game.players.length;
-      const rightPlayer = game.players[rightPlayerIndex];
+      console.log(`Player ${player.username} drew a card, deck remaining: ${game.deck.length}`);
       
-      if (rightPlayer.cards.length > 0) {
-        // Select a random card from the right player
-        const randomIndex = Math.floor(Math.random() * rightPlayer.cards.length);
-        const card = rightPlayer.cards.splice(randomIndex, 1)[0];
-        
-        // Add the card to the current player's hand
-        game.players[playerIndex].cards.push(card);
-        
-        // Notify the current player of their new card
-        socket.emit('cardDrawn', { card, fromPlayer: rightPlayer.username });
-        
-        // Notify the right player that a card was taken
-        io.to(rightPlayer.id).emit('cardTaken', {
-          byPlayer: game.players[playerIndex].username,
-          cardCount: rightPlayer.cards.length
-        });
-        
-        // Notify other players
-        io.to(roomId).emit('playerDrawFromPlayer', {
-          playerId: socket.id,
-          fromPlayerId: rightPlayer.id
-        });
-        
-        console.log(`Player ${game.players[playerIndex].username} drew a card from ${rightPlayer.username}`);
-      }
-      
-      // Send information about other players' cards to all players
-      const playersInfo = game.players.map(p => ({
-        id: p.id,
-        username: p.username,
-        cards: p.cards.length
-      }));
-      
-      io.to(roomId).emit('playersCardsCount', { playersInfo });
+      // Automatically end the turn (no more end turn button)
+      endTurn(game, roomId);
+    } else {
+      // If deck is empty, draw from other players
+      drawFromOtherPlayers(game, playerIndex, roomId);
     }
-    
-    // End turn
-    endTurn(game, roomId);
-  });
-
-  // End turn
-  socket.on('endTurn', () => {
-    const roomId = userRooms[socket.id];
-    if (!roomId || !games[roomId]) return;
-    
-    const game = games[roomId];
-    
-    // Check if it's the player's turn
-    const playerIndex = game.players.findIndex(p => p.id === socket.id);
-    if (playerIndex === -1 || game.currentTurn !== playerIndex) {
-      socket.emit('error', 'Not your turn');
-      return;
-    }
-    
-    endTurn(game, roomId);
   });
 
   // Player disconnection
@@ -668,7 +639,7 @@ function generateRoomId() {
 function createDeck() {
   const deck = [];
   
-  // 16 pairs (boy-girl) + 1 trickster card
+  // Only nationality-based pairs (boy-girl) + 1 trickster card
   const pairs = [
     { name: 'albanezu', type: 'boy' },
     { name: 'albanezu', type: 'girl' },
@@ -684,24 +655,22 @@ function createDeck() {
     { name: 'mongolu', type: 'girl' },
     { name: 'roman', type: 'boy' },
     { name: 'roman', type: 'girl' },
-    { name: 'gradinar', type: 'boy' },
-    { name: 'gradinar', type: 'girl' },
-    { name: 'artist', type: 'boy' },
-    { name: 'artist', type: 'girl' },
-    { name: 'muzician', type: 'boy' },
-    { name: 'muzician', type: 'girl' },
-    { name: 'cioban', type: 'boy' },
-    { name: 'cioban', type: 'girl' },
-    { name: 'doctor', type: 'boy' },
-    { name: 'doctor', type: 'girl' },
-    { name: 'marinar', type: 'boy' },
-    { name: 'marinar', type: 'girl' },
-    { name: 'profesor', type: 'boy' },
-    { name: 'profesor', type: 'girl' },
-    { name: 'bucatar', type: 'boy' },
-    { name: 'bucatar', type: 'girl' },
-    { name: 'fotbalist', type: 'boy' },
-    { name: 'fotbalist', type: 'girl' },
+    { name: 'german', type: 'boy' },
+    { name: 'german', type: 'girl' },
+    { name: 'vietnamez', type: 'boy' },
+    { name: 'vietnamez', type: 'girl' },
+    { name: 'hindus', type: 'boy' },
+    { name: 'hindus', type: 'girl' },
+    { name: 'negru', type: 'boy' },
+    { name: 'negru', type: 'girl' },
+    { name: 'rus', type: 'boy' },
+    { name: 'rus', type: 'girl' },
+    { name: 'maghiar', type: 'boy' },
+    { name: 'maghiar', type: 'girl' },
+    { name: 'arab', type: 'boy' },
+    { name: 'arab', type: 'girl' },
+    { name: 'polonez', type: 'boy' },
+    { name: 'polonez', type: 'girl' },
     { name: 'pacalici', type: 'trickster' }
   ];
   
@@ -723,6 +692,32 @@ function createDeck() {
   return deck;
 }
 
+// Add a helper function to map old card names to nationality-based cards
+function mapOldCardNameToNew(oldName) {
+  if (!oldName) return oldName;
+  
+  const nameMap = {
+    'calusar': 'roman',
+    'pescar': 'vietnamez',
+    'vanator': 'german',
+    'cioban': 'mongolu',
+    'marinar': 'rus',
+    'cosmonaut': 'maghiar',
+    'doctor': 'hindus',
+    'militar': 'albanezu',
+    'mecanic': 'ceh',
+    'profesor': 'polonez',
+    'brutar': 'mexican',
+    'fotbalist': 'arab',
+    'artist': 'coreanu',
+    'bucatar': 'chinezu',
+    'muzician': 'negru',
+    'gradinar': 'german'
+  };
+  
+  return nameMap[oldName.toLowerCase()] || oldName;
+}
+
 // Add a utility function to normalize card data
 function normalizeCardData(card) {
   // Make a copy to avoid modifying the original
@@ -731,6 +726,9 @@ function normalizeCardData(card) {
   // Ensure name is lowercase for consistent comparison
   if (normalizedCard.name) {
     normalizedCard.name = normalizedCard.name.toLowerCase();
+    
+    // Map old card names to new nationality-based ones
+    normalizedCard.name = mapOldCardNameToNew(normalizedCard.name);
   }
   
   // Ensure type is one of the expected values
@@ -787,9 +785,91 @@ function drawCard(game, playerIndex) {
   return card;
 }
 
+// Helper function for drawing from other players
+function drawFromOtherPlayers(game, playerIndex, roomId) {
+  const socket = game.players[playerIndex].id;
+  const availablePlayers = game.players.filter((p, i) => 
+    i !== playerIndex && !p.finished && p.cards.length > 0
+  );
+  
+  if (availablePlayers.length === 0) {
+    io.to(socket).emit('error', 'No other players have cards to draw from');
+    return;
+  }
+  
+  // Find the next player with cards (default to the next player in turn order)
+  let fromPlayerIndex = (playerIndex + 1) % game.players.length;
+  while (fromPlayerIndex !== playerIndex) {
+    if (!game.players[fromPlayerIndex].finished && game.players[fromPlayerIndex].cards.length > 0) {
+      break;
+    }
+    fromPlayerIndex = (fromPlayerIndex + 1) % game.players.length;
+  }
+  
+  const fromPlayer = game.players[fromPlayerIndex];
+  
+  // Select a random card from the other player
+  const randomIndex = Math.floor(Math.random() * fromPlayer.cards.length);
+  const card = fromPlayer.cards.splice(randomIndex, 1)[0];
+  
+  // Add the card to the current player's hand
+  game.players[playerIndex].cards.push(card);
+  
+  // Notify the current player of their new card
+  io.to(socket).emit('cardDrawn', { 
+    card, 
+    fromPlayer: fromPlayer.username,
+    fromPosition: randomIndex
+  });
+  
+  // Notify the player that a card was taken
+  io.to(fromPlayer.id).emit('cardTaken', {
+    byPlayer: game.players[playerIndex].username,
+    cardCount: fromPlayer.cards.length,
+    cardPosition: randomIndex
+  });
+  
+  // Notify all players about the draw
+  io.to(roomId).emit('playerDrawFromPlayer', {
+    playerId: socket.id,
+    fromPlayerId: fromPlayer.id
+  });
+  
+  console.log(`Player ${game.players[playerIndex].username} drew a card from ${fromPlayer.username}`);
+  
+  // Send updated info to all players
+  const playersInfo = game.players.map(p => ({
+    id: p.id,
+    username: p.username,
+    cards: p.cards.length
+  }));
+  
+  io.to(roomId).emit('playersCardsCount', { playersInfo });
+  
+  // Automatically end turn
+  endTurn(game, roomId);
+}
+
+// Update the endTurn function to skip players who have finished
 function endTurn(game, roomId) {
-  // Move to the next player
-  game.currentTurn = (game.currentTurn + 1) % game.players.length;
+  // Start from the next player index
+  let nextPlayerIndex = (game.currentTurn + 1) % game.players.length;
+  const startingIndex = nextPlayerIndex;
+  
+  // Find the next active player
+  while (game.players[nextPlayerIndex].finished) {
+    nextPlayerIndex = (nextPlayerIndex + 1) % game.players.length;
+    
+    // If we've gone full circle, all players but one are done
+    if (nextPlayerIndex === startingIndex) {
+      // Only one player left (with the Păcălici) - game is over
+      checkGameEnd(game, roomId);
+      return;
+    }
+  }
+  
+  // Set the current turn to the next active player
+  game.currentTurn = nextPlayerIndex;
   
   // Notify all players
   io.to(roomId).emit('turnChanged', {
@@ -800,61 +880,57 @@ function endTurn(game, roomId) {
   checkGameEnd(game, roomId);
 }
 
+// Updated gameEnd function to work with the new rules
 function checkGameEnd(game, roomId) {
-  // Game ends when all cards are used and one player has the trickster card
+  // Count active players (players who haven't finished)
+  const activePlayers = game.players.filter(p => !p.finished);
   
-  // Check if deck is empty
-  if (game.deck.length > 0) return;
-  
-  // Check if any player has the trickster card
-  let tricksterFound = false;
-  let loserIndex = -1;
-  
-  for (let i = 0; i < game.players.length; i++) {
-    const player = game.players[i];
+  // If only one player is left, they lose with the Păcălici
+  if (activePlayers.length === 1) {
+    const loser = activePlayers[0];
     
-    // Check if player has trickster
-    const hasTrickster = player.cards.some(card => card.type === 'trickster');
+    // Check if they have the Păcălici card
+    const hasTrickster = loser.cards.some(card => card.type === 'trickster');
     
-    if (hasTrickster) {
-      tricksterFound = true;
-      loserIndex = i;
-      break;
-    }
-  }
-  
-  // Check if only one player has cards left
-  const playersWithCards = game.players.filter(p => p.cards.length > 0);
-  
-  if (playersWithCards.length === 1 && tricksterFound) {
-    // Game over, we have a loser
-    game.status = 'ended';
-    game.loser = game.players[loserIndex].id;
-    
-    // Determine the winner (player with most pairs)
-    let maxPairs = -1;
-    let winnerIndex = -1;
-    
-    for (let i = 0; i < game.players.length; i++) {
-      if (i !== loserIndex && game.players[i].pairs > maxPairs) {
-        maxPairs = game.players[i].pairs;
-        winnerIndex = i;
+    if (hasTrickster || loser.cards.length === 1) {
+      // Game over - the last player with cards is the loser
+      game.status = 'ended';
+      game.loser = loser.id;
+      
+      // Get all winner names
+      const winnerNames = [];
+      const winnerIds = [];
+      
+      // Either use the winners array or calculate based on finished players
+      if (game.winners.length > 0) {
+        // Get names from winners array (in order of finishing)
+        game.winners.forEach(winnerId => {
+          const winnerPlayer = game.players.find(p => p.id === winnerId);
+          if (winnerPlayer) {
+            winnerNames.push(winnerPlayer.username);
+            winnerIds.push(winnerPlayer.id);
+          }
+        });
+      } else {
+        // Backup: get from finished flag
+        game.players.forEach(player => {
+          if (player.finished) {
+            winnerNames.push(player.username);
+            winnerIds.push(player.id);
+          }
+        });
       }
+      
+      // Notify all players
+      io.to(roomId).emit('gameEnded', {
+        winners: winnerNames,
+        winnersIds: winnerIds,
+        loser: loser.username,
+        loserId: loser.id
+      });
+      
+      console.log(`Game ${roomId} ended, winners: ${winnerNames.join(', ')}, loser: ${loser.username} (stuck with Păcălici)`);
     }
-    
-    if (winnerIndex !== -1) {
-      game.winner = game.players[winnerIndex].id;
-    }
-    
-    // Notify all players
-    io.to(roomId).emit('gameEnded', {
-      winner: winnerIndex !== -1 ? game.players[winnerIndex].username : null,
-      winnerId: game.winner,
-      loser: game.players[loserIndex].username,
-      loserId: game.loser
-    });
-    
-    console.log(`Game ${roomId} ended, ${game.players[winnerIndex].username} won, ${game.players[loserIndex].username} lost with trickster`);
   }
 }
 

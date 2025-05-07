@@ -49,6 +49,12 @@
                 <h3 class="font-semibold mb-2 text-gray-300">Jucători conectați:</h3>
                 <ul id="players-list" class="space-y-2"></ul>
             </div>
+            
+            <!-- Game Rules Section -->
+            <div class="mb-4 p-3 bg-gray-700 bg-opacity-30 rounded">
+                <div id="game-rules-options"></div>
+            </div>
+            
             <button id="start-game-btn" class="w-full bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all duration-200">Începe jocul</button>
             <p id="waiting-message" class="mt-2 text-sm text-gray-400 text-center">Ai nevoie de cel puțin 2 jucători pentru a începe</p>
         </div>
@@ -87,9 +93,6 @@
                                 <button id="draw-card-btn" class="control-btn draw-btn">
                                     <span>Trage o carte</span>
                                 </button>
-                                <button id="end-turn-btn" class="control-btn end-turn-btn">
-                                    <span>Termină tura</span>
-                                </button>
                                 <button id="simulate-empty-deck-btn" class="control-btn simulate-btn">
                                     <span>Simulează pachet gol</span>
                                 </button>
@@ -122,7 +125,7 @@
             <h2 class="text-2xl font-semibold text-center mb-4 text-white">Joc terminat!</h2>
             <div id="winner-info" class="text-center mb-4">
                 <div class="mb-2">
-                    <span class="inline-block bg-yellow-400 text-yellow-800 px-2 py-1 rounded text-sm font-semibold">Câștigător</span>
+                    <span class="inline-block bg-yellow-400 text-yellow-800 px-2 py-1 rounded text-sm font-semibold">Câștigători</span>
                 </div>
                 <p class="text-xl font-bold text-white" id="winner-name"></p>
             </div>
@@ -176,17 +179,18 @@
                 <ol class="list-decimal ml-5">
                     <li>Fiecare jucător primește 4 cărți.</li>
                     <li>În tura ta, dacă ai o pereche (băiat-fată din aceeași categorie), o depui pe masă.</li>
-                    <li>După ce ai format perechi (dacă e cazul), tragi o carte nouă din pachet.</li>
-                    <li>Dacă ai format din nou perechi, le depui pe masă.</li>
-                    <li>Când se termină pachetul, jucătorii vor trage cărți de la cel din dreapta.</li>
-                    <li>Câștigătorul este primul jucător care rămâne fără cărți.</li>
-                    <li>Pierzătorul este cel care rămâne cu cartea Păcălici.</li>
+                    <li>După ce ai format perechi (dacă e cazul), tragi o carte nouă din pachet sau de la alt jucător.</li>
+                    <li>Dacă formezi toate perechile și rămâi fără cărți, ai terminat jocul și ieși din rundă.</li>
+                    <li>Când se termină pachetul, jucătorii vor trage cărți unul de la celălalt.</li>
+                    <li>Jucătorii care termină toate perechile ies din joc ca învingători.</li>
+                    <li>Pierzătorul este cel care rămâne ultimul cu cartea Păcălici.</li>
                 </ol>
                 
                 <h3 class="text-lg font-semibold text-white">Sfaturi</h3>
                 <ul class="list-disc ml-5">
                     <li>Încearcă să memorezi cărțile celorlalți jucători.</li>
                     <li>Dacă ai Păcăliciul, încearcă să scapi de el cât mai rapid.</li>
+                    <li>Rearanjează-ți cărțile când pachetul e gol pentru a ascunde Păcăliciul.</li>
                 </ul>
             </div>
         </div>
@@ -198,7 +202,9 @@
         </svg>
     </button>
 
+    <!-- Scripts -->
     <script src="/socket.io/socket.io.js"></script>
+    <script src="js/gameRules.js"></script>
     <script src="js/game.js"></script>
 </body>
 </html> 

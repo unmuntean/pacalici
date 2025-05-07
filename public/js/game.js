@@ -17,6 +17,8 @@ const gameState = {
   isDragging: false,
   draggedCard: null,
   draggedCardIndex: null,
+  finishedPlayers: [], // Track players who have finished their cards
+  gameRules: {} // Store the active game rules
 };
 
 // DOM elements
@@ -47,7 +49,6 @@ const elements = {
     pairsContainer: document.getElementById('pairs-container'),
     actionButtons: document.getElementById('action-buttons'),
     drawCardBtn: document.getElementById('draw-card-btn'),
-    endTurnBtn: document.getElementById('end-turn-btn'),
     simulateEmptyDeckBtn: document.getElementById('simulate-empty-deck-btn')
   },
   gameOver: {
@@ -62,35 +63,25 @@ const elements = {
   closeRulesBtn: document.getElementById('close-rules')
 };
 
-// Icons for different card types (fallbacks for cards without images)
+// Icons for different card types (only using image-based cards)
 const cardIcons = {
-  // Keeping these emoji icons as fallbacks
-  calusar: '👨‍🎤',
-  pescar: '🎣',
-  vanator: '🔫',
-  gradinar: '🌱',
-  cioban: '🐑',
-  marinar: '⚓',
-  cosmonaut: '🚀',
-  doctor: '⚕️',
-  militar: '🪖',
-  mecanic: '🔧',
-  profesor: '📚',
-  brutar: '🍞',
-  fotbalist: '⚽',
-  artist: '🎨',
-  bucatar: '👨‍🍳',
-  muzician: '🎵',
-  // Trickster always has an image, but keeping as fallback
-  pacalici: '🃏',
-  // New card types that have images
+  // Only using nationalities with actual images
   albanezu: '👤',
   ceh: '👤',
   chinezu: '👤',
   coreanu: '👤',
   mexican: '👤',
   mongolu: '👤',
-  roman: '👤'
+  roman: '👤',
+  german: '👤',
+  vietnamez: '👤',
+  hindus: '👤',
+  negru: '👤',
+  rus: '👤',
+  maghiar: '👤',
+  arab: '👤', // Changed from fotbalist
+  polonez: '👤', // Changed from profesor
+  pacalici: '🃏'
 };
 
 // Images for different card types (mapping to actual image files)
@@ -124,57 +115,37 @@ const cardImages = {
     girl: '/img/romanca.png'
   },
   // Add the other card types that need images
-  artist: {
-    boy: '/img/artist.png',
-    girl: '/img/artist.png'
+  german: {
+    boy: '/img/german.png',
+    girl: '/img/germana.png'
   },
-  vanator: {
-    boy: '/img/vanator.png',
-    girl: '/img/vanator.png'
+  vietnamez: {
+    boy: '/img/vietnamez.png',
+    girl: '/img/vietnameza.png'
   },
-  cioban: {
-    boy: '/img/cioban.png',
-    girl: '/img/cioban.png'
+  hindus: {
+    boy: '/img/hindus.png',
+    girl: '/img/hindusa.png'
   },
-  muzician: {
-    boy: '/img/muzician.png',
-    girl: '/img/muzician.png'
+  negru: {
+    boy: '/img/negru.png',
+    girl: '/img/negresa.png'
   },
-  calusar: {
-    boy: '/img/calusar.png',
-    girl: '/img/calusar.png'
+  rus: {
+    boy: '/img/rus.png',
+    girl: '/img/rusoaica.png'
   },
-  cosmonaut: {
-    boy: '/img/cosmonaut.png',
-    girl: '/img/cosmonaut.png'
+  maghiar: {
+    boy: '/img/maghiar.png',
+    girl: '/img/maghiara.png'
   },
-  fotbalist: {
-    boy: '/img/fotbalist.png',
-    girl: '/img/fotbalist.png'
+  arab: {
+    boy: '/img/arab.png',
+    girl: '/img/araboaica.png'
   },
-  profesor: {
-    boy: '/img/profesor.png',
-    girl: '/img/profesor.png'
-  },
-  mecanic: {
-    boy: '/img/mecanic.png',
-    girl: '/img/mecanic.png'
-  },
-  doctor: {
-    boy: '/img/doctor.png',
-    girl: '/img/doctor.png'
-  },
-  gradinar: {
-    boy: '/img/gradinar.png',
-    girl: '/img/gradinar.png'
-  },
-  marinar: {
-    boy: '/img/marinar.png',
-    girl: '/img/marinar.png'
-  },
-  bucatar: {
-    boy: '/img/bucatar.png',
-    girl: '/img/bucatar.png'
+  polonez: {
+    boy: '/img/polonez.png',
+    girl: '/img/poloneza.png'
   },
   pacalici: {
     trickster: '/img/pacalici.png'
@@ -206,19 +177,49 @@ function initGame() {
   // Show loading message
   showConnectingMessage();
   
-  // Connect to the server with better options for mobile compatibility
+  // Get the hostname dynamically
+  const hostname = window.location.hostname;
+  const port = window.location.port ? `:${window.location.port}` : '';
+  const protocol = window.location.protocol;
+  
+  // Check if we should force polling transport
+  const forcePolling = localStorage.getItem('force_polling') === 'true';
+  
+  // Debug connection info
+  console.log(`[Connection] Connecting to ${protocol}//${hostname}${port}`);
+  console.log(`[Connection] Force polling mode: ${forcePolling}`);
+  
+  // Set transport options based on compatibility mode
+  const transportOptions = forcePolling ? 
+    ['polling', 'websocket'] : // Polling first if forced
+    ['websocket', 'polling'];  // WebSocket first by default
+  
+  // Connect to the server with better options for mobile and desktop compatibility
   gameState.socket = io({
-    transports: ['websocket', 'polling'],  // Try WebSocket first, fallback to polling
-    reconnectionAttempts: 5,               // Try to reconnect 5 times
+    transports: transportOptions,
+    reconnectionAttempts: 10,              // Increased retry attempts
     reconnectionDelay: 1000,               // Start with 1s delay
     reconnectionDelayMax: 5000,            // Maximum 5s delay
-    timeout: 20000                         // 20s connection timeout
+    timeout: 20000,                        // 20s connection timeout
+    forceNew: true,                        // Force a new connection
+    upgrade: !forcePolling,                // Allow transport upgrade unless we're forcing polling
+    autoConnect: true,                     // Auto connect
+    query: { 
+      "clientType": "browser",
+      "mobile": /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+    }
   });
   
-  // Add connection event listeners
+  // Add connection event listeners with more detailed logging
   gameState.socket.on('connect', () => {
     console.log('[Socket] Connected successfully');
+    console.log('[Socket] Transport:', gameState.socket.io.engine.transport.name);
     hideConnectingMessage();
+    
+    // Initialize game rules UI
+    if (typeof gameRules !== 'undefined') {
+      gameRules.renderRulesUI(document.getElementById('game-rules-options'));
+    }
     
     // Check image loading
     preloadCardImages();
@@ -229,7 +230,23 @@ function initGame() {
   
   gameState.socket.on('connect_error', (error) => {
     console.error('[Socket] Connection error:', error);
+    console.error('[Socket] Connection URL:', gameState.socket.io.uri);
     showConnectionError('Nu s-a putut conecta la server. Verifică conexiunea la internet și încearcă din nou.');
+  });
+  
+  // Enhanced reconnection logic
+  let reconnectAttempts = 0;
+  gameState.socket.on('reconnect_attempt', (attemptNumber) => {
+    reconnectAttempts = attemptNumber;
+    console.log(`[Socket] Reconnection attempt ${attemptNumber}...`);
+    
+    // On later reconnect attempts, try switching transport
+    if (attemptNumber > 3) {
+      console.log('[Socket] Switching to polling transport for reconnection');
+      gameState.socket.io.opts.transports = ['polling', 'websocket'];
+    }
+    
+    showConnectingMessage(`Reconectare... (Încercare ${attemptNumber}/10)`);
   });
   
   gameState.socket.on('disconnect', (reason) => {
@@ -251,7 +268,15 @@ function initGame() {
   
   gameState.socket.on('reconnect_failed', () => {
     console.error('[Socket] Failed to reconnect after multiple attempts');
-    showConnectionError('Reconectarea la server a eșuat. Reîncărcați pagina pentru a încerca din nou.');
+    
+    // Show detailed connection troubleshooting for mobile
+    let errorMessage = 'Reconectarea la server a eșuat. Încearcă următoarele:';
+    errorMessage += '<br>1. Verifică conexiunea la internet';
+    errorMessage += '<br>2. Închide și redeschide browser-ul';
+    errorMessage += '<br>3. Încearcă un browser diferit';
+    errorMessage += '<br>4. Încearcă să te conectezi prin rețeaua de date mobile';
+    
+    showConnectionError(errorMessage);
   });
   
   // Set up other event listeners
@@ -303,14 +328,28 @@ function showConnectionError(message) {
     document.body.appendChild(overlay);
   }
   
+  // Include connection debug info
+  const debugInfo = navigator.userAgent;
+  const connectionType = navigator.connection ? 
+    `${navigator.connection.effectiveType || 'unknown'} (${navigator.onLine ? 'online' : 'offline'})` : 
+    'unknown';
+  
   // Update with error content
   overlay.innerHTML = `
     <div class="bg-gray-800 p-6 rounded-lg shadow-lg text-center max-w-md">
       <div class="text-red-500 text-5xl mb-4">⚠️</div>
       <h2 class="text-white text-xl font-bold mb-2">Eroare de conexiune</h2>
       <p class="text-white mb-4">${message}</p>
+      <div class="mb-4 text-xs text-gray-400 text-left p-2 bg-gray-700 rounded overflow-auto max-h-24">
+        <div>Browser: ${debugInfo}</div>
+        <div>Conexiune: ${connectionType}</div>
+        <div>Adresă: ${window.location.href}</div>
+      </div>
       <button id="retry-connection" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">
         Reîncărcați pagina
+      </button>
+      <button id="force-polling" class="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded mt-2">
+        Forțează conexiune alternativă
       </button>
     </div>
   `;
@@ -320,7 +359,20 @@ function showConnectionError(message) {
     window.location.reload();
   });
   
+  // Add force polling button functionality
+  document.getElementById('force-polling').addEventListener('click', () => {
+    localStorage.setItem('force_polling', 'true');
+    window.location.reload();
+  });
+  
   overlay.style.display = 'flex';
+  
+  // Add special fix for iOS Safari which might have connectivity issues
+  if (/iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+    console.log('[Connection] iOS device detected, applying special fixes');
+    // Forces a network activity which can help in some iOS versions
+    fetch(window.location.href + '?ping=' + Date.now()).catch(() => {});
+  }
 }
 
 // Set up Socket.IO event listeners
@@ -338,8 +390,11 @@ function setupSocketListeners() {
     // Add yourself to the player list
     addPlayerToWaitingList(gameState.username, playerId);
     
-    // Show waiting room
+    // Show waiting room and render rules options
     showScreen('waitingRoom');
+    if (typeof gameRules !== 'undefined') {
+      gameRules.renderRulesUI(document.getElementById('game-rules-options'));
+    }
   });
   
   // Player joined
@@ -355,7 +410,7 @@ function setupSocketListeners() {
   });
   
   // Game joined
-  socket.on('gameJoined', ({ roomId, playerId, players }) => {
+  socket.on('gameJoined', ({ roomId, playerId, players, activeRules }) => {
     gameState.roomId = roomId;
     gameState.playerId = playerId;
     
@@ -368,6 +423,14 @@ function setupSocketListeners() {
       addPlayerToWaitingList(player.username, player.id);
     });
     
+    // Update game rules if provided
+    if (activeRules && typeof gameRules !== 'undefined') {
+      Object.keys(activeRules).forEach(ruleId => {
+        gameRules.setRule(ruleId, activeRules[ruleId]);
+      });
+      gameRules.renderRulesUI(document.getElementById('game-rules-options'));
+    }
+    
     // Show waiting room
     showScreen('waitingRoom');
     
@@ -376,9 +439,14 @@ function setupSocketListeners() {
   });
   
   // Game started
-  socket.on('gameStarted', ({ currentTurn, deckCount, playersInfo }) => {
+  socket.on('gameStarted', ({ currentTurn, deckCount, playersInfo, activeRules }) => {
     gameState.currentTurn = currentTurn;
     gameState.deckCount = deckCount;
+    
+    // Store active game rules
+    if (activeRules) {
+      gameState.gameRules = activeRules;
+    }
     
     // Reset game state
     gameState.selectedCards = [];
@@ -421,11 +489,18 @@ function setupSocketListeners() {
   
   // Turn changed
   socket.on('turnChanged', ({ currentTurn }) => {
+    const previousTurn = gameState.currentTurn;
     gameState.currentTurn = currentTurn;
     
     // Update UI
     checkTurn();
     updateGamePlayersList();
+    
+    // Play sound when the turn changes TO this player (it's now your turn)
+    // But only if it's not the initial turn assignment
+    if (previousTurn !== null && currentTurn === gameState.playerId) {
+      playSound('turn');
+    }
   });
   
   // Player drew a card
@@ -448,23 +523,21 @@ function setupSocketListeners() {
     
     if (fromPlayer) {
       showNotification(`Ai tras cartea #${fromPosition + 1} de la ${fromPlayer}`);
-      // Reset selection
+      // Reset selection without removing the card visually
       gameState.selectedPlayerForDraw = null;
       gameState.selectedCardPosition = null;
       
-      // Explicitly request and re-render other players' cards state after drawing
+      // Keep the card visually for other players (handled by server)
+      // Just request updated info to keep UI in sync
       console.log("[Rendering] Triggering requestOtherPlayersCards after drawing from player.");
       requestOtherPlayersCards(); 
       
       // Update draw button text back to default
       checkTurn(); 
-
     } else {
+      // Play sound when drawing from deck (server confirmed)
+      playSound('draw');
       showNotification('Ai tras o carte din pachet');
-      
-      // Update deck count (assuming server sends deckCountUpdated separately)
-      // const deckCount = parseInt(elements.gameBoard.deckCount.textContent) - 1;
-      // elements.gameBoard.deckCount.textContent = deckCount;
     }
   });
   
@@ -502,7 +575,7 @@ function setupSocketListeners() {
   });
   
   // Pair declared
-  socket.on('pairDeclared', ({ playerId, cards, remainingCardCount, pairs }) => {
+  socket.on('pairDeclared', ({ playerId, cards, remainingCardCount, pairs, hasFinished }) => {
     // Find player in the list
     const player = gameState.players.find(p => p.id === playerId);
     
@@ -512,6 +585,9 @@ function setupSocketListeners() {
       
       // If it's your pair
       if (playerId === gameState.playerId) {
+        // Play match sound when server confirms the pair
+        playSound('match');
+        
         // Add to your pairs
         gameState.myPairs.push(cards);
         
@@ -528,8 +604,21 @@ function setupSocketListeners() {
         
         // Render cards
         renderPlayerCards();
+        
+        // If player has finished their cards, show notification
+        if (hasFinished && remainingCardCount === 0) {
+          showNotification('Ai format toate perechile! Ai terminat jocul.', 'success');
+          gameState.finishedPlayers.push(playerId);
+        }
       } else {
-        showNotification(`${player.username} a format o pereche`);
+        // If other player finished their cards
+        if (hasFinished && remainingCardCount === 0) {
+          showNotification(`${player.username} a format toate perechile și a terminat jocul!`, 'success');
+          gameState.finishedPlayers.push(playerId);
+        } else {
+          showNotification(`${player.username} a format o pereche`);
+        }
+        
         // Update the display of the other player's pairs
         renderAllPlayersPairs();
       }
@@ -545,9 +634,13 @@ function setupSocketListeners() {
   });
   
   // Game ended
-  socket.on('gameEnded', ({ winner, winnerId, loser, loserId }) => {
+  socket.on('gameEnded', ({ winners, winnersIds, loser, loserId }) => {
     // Update game over screen
-    elements.gameOver.winnerName.textContent = winner || 'Nimeni';
+    if (Array.isArray(winners)) {
+      elements.gameOver.winnerName.textContent = winners.join(', ');
+    } else {
+      elements.gameOver.winnerName.textContent = winners || 'Nimeni';
+    }
     elements.gameOver.loserName.textContent = loser;
     
     // Show game over screen
@@ -668,7 +761,11 @@ function setupUIListeners() {
   
   // Start game button
   elements.waitingRoom.startGameBtn.addEventListener('click', () => {
-    gameState.socket.emit('startGame');
+    // Get current rules settings
+    const activeRules = (typeof gameRules !== 'undefined') ? gameRules.getAllRules() : {};
+    
+    // Send start game with rules
+    gameState.socket.emit('startGame', { rules: activeRules });
   });
   
   // Draw card button
@@ -691,16 +788,12 @@ function setupUIListeners() {
           showNotification('Selectează o carte de la un jucător', 'error');
         }
       } else {
-        // Normal draw from deck
+        // Normal draw from deck - play sound
+        playSound('draw');
+        
+        // Emit the draw card event
         gameState.socket.emit('drawCard');
       }
-    }
-  });
-  
-  // End turn button
-  elements.gameBoard.endTurnBtn.addEventListener('click', () => {
-    if (gameState.isMyTurn) {
-      gameState.socket.emit('endTurn');
     }
   });
   
@@ -800,6 +893,7 @@ function updateGamePlayersList() {
   gameState.players.forEach(player => {
     const isCurrent = player.id === gameState.currentTurn;
     const isYou = player.id === gameState.playerId;
+    const hasFinished = gameState.finishedPlayers.includes(player.id);
     
     const listItem = document.createElement('li');
     listItem.classList.add('player-indicator');
@@ -808,16 +902,21 @@ function updateGamePlayersList() {
       listItem.classList.add('current');
     }
     
+    if (hasFinished) {
+      listItem.classList.add('finished');
+    }
+    
     listItem.innerHTML = `
       <div class="player-avatar">${player.username.substring(0, 1).toUpperCase()}</div>
       <div class="flex-1">
         <div class="flex justify-between items-center">
           <span class="text-gray-200">${player.username}</span>
           ${isYou ? '<span class="text-sm text-blue-400">Tu</span>' : ''}
+          ${hasFinished ? '<span class="text-sm text-green-400">✓ Terminat</span>' : ''}
         </div>
         <div class="text-sm text-gray-400">Perechi: ${player.pairs || 0}</div>
       </div>
-      ${isCurrent ? '<div class="your-turn-indicator ml-2">➤</div>' : ''}
+      ${isCurrent && !hasFinished ? '<div class="your-turn-indicator ml-2">➤</div>' : ''}
     `;
     
     elements.gameBoard.playersList.appendChild(listItem);
@@ -826,6 +925,9 @@ function updateGamePlayersList() {
 
 function checkTurn() {
   gameState.isMyTurn = gameState.currentTurn === gameState.playerId;
+  
+  // If player has finished, they can't take any actions
+  const playerHasFinished = gameState.finishedPlayers.includes(gameState.playerId);
   
   // Update current player name
   const currentPlayer = gameState.players.find(p => p.id === gameState.currentTurn);
@@ -838,7 +940,7 @@ function checkTurn() {
   }
   
   // Show/hide action buttons
-  if (gameState.isMyTurn) {
+  if (gameState.isMyTurn && !playerHasFinished) {
     elements.gameBoard.actionButtons.classList.remove('hidden');
     
     // Update draw card button text based on deck state and selection
@@ -866,9 +968,44 @@ function checkTurn() {
   }
 }
 
+// Add a helper function to validate card types
+function isValidNationalityCard(cardName) {
+  // List of all valid nationality cards
+  const validCards = [
+    'albanezu', 'ceh', 'chinezu', 'coreanu', 'mexican', 
+    'mongolu', 'roman', 'german', 'vietnamez', 'hindus', 
+    'negru', 'rus', 'maghiar', 'arab', 'polonez', 'pacalici'
+  ];
+  
+  return validCards.includes(cardName.toLowerCase());
+}
+
+// Modify the renderPlayerCards function to check for nationality cards
 function renderPlayerCards() {
   // Clear the container
   elements.gameBoard.playerCards.innerHTML = '';
+  
+  // Check if player has finished
+  const playerHasFinished = gameState.finishedPlayers.includes(gameState.playerId);
+  
+  if (playerHasFinished) {
+    // Display finished message
+    const finishedMessage = document.createElement('div');
+    finishedMessage.className = 'bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-4 rounded';
+    finishedMessage.innerHTML = `
+      <div class="flex items-center">
+        <div class="py-1"><svg class="h-6 w-6 text-green-500 mr-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+        </svg></div>
+        <div>
+          <p class="font-bold">Ai terminat jocul!</p>
+          <p class="text-sm">Ai format toate perechile și aștepți ca ceilalți jucători să termine.</p>
+        </div>
+      </div>
+    `;
+    elements.gameBoard.playerCards.appendChild(finishedMessage);
+    return;
+  }
   
   // Add 'reorder cards' instruction if deck is empty
   if (gameState.isDeckEmpty && gameState.myCards.length > 1) {
@@ -885,14 +1022,45 @@ function renderPlayerCards() {
   
   // Add each card
   gameState.myCards.forEach((card, index) => {
-    // --- Add Log Here --- 
-    console.log(`[Render] Rendering card at index ${index}: Name=${card.name}, Type=${card.type}, ID=${card.id}`);
-    // ---------------------
-    const isSelected = gameState.selectedCards.some(c => c.id === card.id);
+    // Normalize card data
+    const normalizedCard = normalizeCardData(card);
     
+    // Check if it's a valid nationality card
+    let cardImageSrc = '';
+    let cardName = normalizedCard.name;
+    
+    // If it's not a valid nationality card, force the mapping
+    if (!isValidNationalityCard(normalizedCard.name) && normalizedCard.name !== 'pacalici') {
+      const mappedName = mapOldCardNameToNew(normalizedCard.name);
+      if (isValidNationalityCard(mappedName)) {
+        cardName = mappedName;
+        console.log(`[Card Render] Mapped old card ${normalizedCard.name} to ${cardName}`);
+      } else {
+        console.warn(`[Card Render] Invalid card name: ${normalizedCard.name}, no mapping found`);
+      }
+    }
+    
+    // Set the image source based on card name and type
+    try {
+      if (cardName === 'pacalici') {
+        cardImageSrc = cardImages.pacalici.trickster;
+      } else if (cardImages[cardName] && cardImages[cardName][normalizedCard.type]) {
+        cardImageSrc = cardImages[cardName][normalizedCard.type];
+      } else {
+        // Fallback to placeholder image for invalid cards
+        console.warn(`[Card Render] No image for ${cardName}/${normalizedCard.type}`);
+        cardImageSrc = '/img/placeholder.png';
+      }
+    } catch (err) {
+      console.error('[Card Render] Error getting card image:', err);
+      cardImageSrc = '/img/placeholder.png';
+    }
+    
+    // Create card element
     const cardElement = document.createElement('div');
     cardElement.classList.add('card');
     
+    const isSelected = gameState.selectedCards.some(c => c.id === card.id);
     if (isSelected) {
       cardElement.classList.add('selected');
     }
@@ -903,87 +1071,25 @@ function renderPlayerCards() {
       cardElement.dataset.index = index;
     }
     
-    // Normalize card data
-    const normalizedCard = normalizeCardData(card);
-    
-    // Get the image for the card
-    let cardImageSrc = '';
-    
-    console.log(`[Card Debug] Rendering card: ${card.name} (${normalizedCard.name}), type: ${card.type} (${normalizedCard.type})`);
-    
-    try {
-      if (normalizedCard.name === 'pacalici') {
-        // Trickster card always uses the trickster image
-        cardImageSrc = cardImages.pacalici.trickster;
-        console.log(`[Card Render] Using trickster image: ${cardImageSrc}`);
-      } else if (cardImages[normalizedCard.name] && cardImages[normalizedCard.name][normalizedCard.type]) {
-        // We have an image for this specific card name and type
-        cardImageSrc = cardImages[normalizedCard.name][normalizedCard.type];
-        console.log(`[Card Render] Found exact image for ${normalizedCard.name}/${normalizedCard.type}: ${cardImageSrc}`);
-      } else {
-        // Fallback to emoji
-        const icon = cardIcons[normalizedCard.name] || '❓';
-        console.log(`[Card Render] No image mapping found for ${normalizedCard.name}/${normalizedCard.type}, using emoji: ${icon}`);
-        cardImageSrc = '';
-      }
-    } catch (err) {
-      console.error('[Card Render] Error getting card image:', err);
-      cardImageSrc = '';
-    }
-    
     // Add position indicator if deck is empty
     const positionIndicator = gameState.isDeckEmpty ? 
       `<div class="card-position-indicator">${index + 1}</div>` : '';
     
-    if (cardImageSrc) {
-      // Use image for card with error handling
-      cardElement.innerHTML = `
-        ${positionIndicator}
-        <div class="card-inner">
-          <div class="card-front ${normalizedCard.type}">
-            <div class="card-name">${formatCardName(normalizedCard.name)}</div>
-            <img 
-              src="${cardImageSrc}" 
-              alt="${formatCardName(normalizedCard.name)}" 
-              class="card-img" 
-              onerror="console.error('[Image Error] Failed to load: ' + this.src); this.onerror=null; this.src=''; this.style.display='none'; this.parentElement.querySelector('.card-icon').style.display='block';"
-            >
-            <div class="card-icon" style="display: none;">${cardIcons[normalizedCard.name] || '❓'}</div>
-            <div class="card-type">${formatCardType(normalizedCard.type)}</div>
-          </div>
+    // Render card with image
+    cardElement.innerHTML = `
+      ${positionIndicator}
+      <div class="card-inner">
+        <div class="card-front ${normalizedCard.type}">
+          <img 
+            src="${cardImageSrc}" 
+            alt="${formatCardName(cardName)}" 
+            class="card-img" 
+            onerror="console.error('[Image Error] Failed to load: ' + this.src); this.onerror=null; this.src='/img/placeholder.png';"
+          >
+          <div class="card-type">${formatCardType(normalizedCard.type)}</div>
         </div>
-      `;
-      
-      // Verify image loading
-      const img = new Image();
-      img.onload = () => {
-        console.log(`[Image Verify] Successfully loaded: ${cardImageSrc}`);
-      };
-      img.onerror = () => {
-        console.error(`[Image Verify] Failed to load: ${cardImageSrc}`);
-        // Find the element and show fallback
-        const imgEl = cardElement.querySelector('.card-img');
-        const iconEl = cardElement.querySelector('.card-icon');
-        if (imgEl && iconEl) {
-          imgEl.style.display = 'none';
-          iconEl.style.display = 'block';
-        }
-      };
-      img.src = cardImageSrc;
-    } else {
-      // Fallback to emoji
-      const icon = cardIcons[normalizedCard.name] || '❓';
-      cardElement.innerHTML = `
-        ${positionIndicator}
-        <div class="card-inner">
-          <div class="card-front ${normalizedCard.type}">
-            <div class="card-name">${formatCardName(normalizedCard.name)}</div>
-            <div class="card-icon">${icon}</div>
-            <div class="card-type">${formatCardType(normalizedCard.type)}</div>
-          </div>
-        </div>
-      `;
-    }
+      </div>
+    `;
     
     // Add click event for selecting to form pairs
     cardElement.addEventListener('click', () => {
@@ -1018,8 +1124,7 @@ function renderPlayerCards() {
         
         // Check if they form a pair
         if (isPair(card1, card2)) {
-          // Play pair match sound
-          playSound('match');
+          // Don't play sound here - wait for server confirmation
           console.log("[Pair Matched] Sending to server");
           
           // Declare the pair
@@ -1191,8 +1296,8 @@ function formatCardType(type) {
 function renderOtherPlayersCards() {
   // Only show other players' cards if the deck is empty
   if (!gameState.isDeckEmpty) {
-      console.log("[Render Skip] Deck is not empty, skipping renderOtherPlayersCards.");
-      return;
+    console.log("[Render Skip] Deck is not empty, skipping renderOtherPlayersCards.");
+    return;
   }
   
   // Create or update the container for other players' cards
@@ -1207,9 +1312,14 @@ function renderOtherPlayersCards() {
     heading.className = 'text-lg font-semibold mb-3 text-white';
     heading.textContent = 'Cărțile altor jucători';
     
+    // Add rule-specific text
+    const subtitleText = gameState.gameRules.nextPlayerOnly 
+      ? 'Selectează o carte de la următorul jucător activ. Regula "Doar următorul jucător" este activă.'
+      : 'Selectează o carte de la un jucător. Fiecare jucător își poate rearanja cărțile.';
+    
     const subtitle = document.createElement('p');
     subtitle.className = 'text-sm text-gray-400 mb-4';
-    subtitle.textContent = 'Selectează o carte de la un jucător. Fiecare jucător își poate rearanja cărțile.';
+    subtitle.textContent = subtitleText;
     
     otherPlayersContainer.appendChild(heading);
     otherPlayersContainer.appendChild(subtitle);
@@ -1226,24 +1336,22 @@ function renderOtherPlayersCards() {
     otherPlayersContainer.removeChild(otherPlayersContainer.lastChild);
   }
   
-  // Get other players (players other than yourself)
-  const otherPlayers = gameState.players.filter(p => p.id !== gameState.playerId);
+  // Get eligible players based on rules
+  let eligiblePlayers = getEligiblePlayersForDraw();
   
   // Check if we need to request updated card info (less frequent now)
-  if (otherPlayers.some(p => typeof p.cards !== 'number' || !p.cardPositions)) { 
+  if (eligiblePlayers.some(p => typeof p.cards !== 'number' || !p.cardPositions)) { 
     console.log("[Data Check] Requesting player card info as it seems outdated or missing...");
     requestOtherPlayersCards();
     return; // Avoid rendering with incomplete data
   }
   
   let hasPlayersWithCards = false;
-  // Create a section for each player
-  otherPlayers.forEach(player => {
-    // Use the COUNT stored in player.cards now
+  
+  // Create a section for each eligible player
+  eligiblePlayers.forEach(player => {
     const cardCount = player.cards;
-    // --- Add Log Here --- 
     console.log(`[renderOtherPlayersCards] Rendering for ${player.username}, card count from gameState: ${cardCount}`);
-    // ---------------------
 
     // Skip players with no cards
     if (cardCount === 0) return;
@@ -1251,6 +1359,11 @@ function renderOtherPlayersCards() {
     hasPlayersWithCards = true;
     const playerSection = document.createElement('div');
     playerSection.className = 'other-player-section';
+    
+    // Add a rule indicator if this is the next player
+    if (gameState.gameRules.nextPlayerOnly) {
+      playerSection.classList.add('next-player');
+    }
     
     const playerHeader = document.createElement('div');
     playerHeader.className = 'flex justify-between items-center mb-2';
@@ -1314,7 +1427,10 @@ function renderOtherPlayersCards() {
           
           cardBack.classList.add('selected');
           
-          // Update the draw button text
+          // Create or update the inline draw button
+          updateInlineDrawButton(player.username, i);
+          
+          // Update the main draw button text
           if (elements.gameBoard.drawCardBtn) {
             elements.gameBoard.drawCardBtn.innerHTML = `<span>Trage cartea #${i + 1} de la ${player.username}</span>`;
           }
@@ -1332,10 +1448,16 @@ function renderOtherPlayersCards() {
     otherPlayersContainer.appendChild(playerSection);
   });
   
+  // Add a container for the inline draw button
+  const inlineDrawButtonContainer = document.createElement('div');
+  inlineDrawButtonContainer.id = 'inline-draw-button-container';
+  inlineDrawButtonContainer.className = 'inline-draw-button-container hidden';
+  otherPlayersContainer.appendChild(inlineDrawButtonContainer);
+  
   // Add instructions container if there are players with cards
   if (hasPlayersWithCards) {
       const instructionsContainer = document.createElement('div');
-      instructionsContainer.className = 'mt-4 p-3 bg-gray-700 bg-opacity-50 rounded-md text-gray-300 text-sm';
+      instructionsContainer.className = 'mt-4 p-3 bg-gray-700 bg-opacity-50 rounded-md text-gray-300 text-sm game-instructions';
       instructionsContainer.innerHTML = `
         <p class="mb-2"><span class="font-semibold text-yellow-400">Cum se joacă:</span> Acum că pachetul este gol, fiecare jucător trebuie să tragă o carte de la ceilalți jucători.</p>
         <ul class="list-disc ml-5 space-y-1">
@@ -1354,6 +1476,47 @@ function renderOtherPlayersCards() {
     message.textContent = 'Niciun alt jucător nu are cărți.';
     otherPlayersContainer.appendChild(message);
   }
+  
+  // If there's a currently selected card, display the inline draw button
+  if (gameState.selectedPlayerForDraw !== null && gameState.selectedCardPosition !== null) {
+    const selectedPlayer = gameState.players.find(p => p.id === gameState.selectedPlayerForDraw);
+    if (selectedPlayer) {
+      updateInlineDrawButton(selectedPlayer.username, gameState.selectedCardPosition);
+    }
+  }
+}
+
+// New function to handle the inline draw button
+function updateInlineDrawButton(playerName, cardPosition) {
+  const container = document.getElementById('inline-draw-button-container');
+  if (!container) return;
+  
+  container.innerHTML = '';
+  container.classList.remove('hidden');
+  
+  if (!gameState.isMyTurn) return;
+  
+  const drawBtn = document.createElement('button');
+  drawBtn.className = 'control-btn draw-btn inline-draw-btn pulse-animation';
+  drawBtn.innerHTML = `<span>Trage cartea #${cardPosition + 1} de la ${playerName}</span>`;
+  
+  drawBtn.addEventListener('click', () => {
+    if (gameState.isMyTurn && gameState.selectedPlayerForDraw !== null && gameState.selectedCardPosition !== null) {
+      // Draw specific card from player
+      gameState.socket.emit('drawCardFromPlayer', {
+        fromPlayerId: gameState.selectedPlayerForDraw,
+        cardPosition: gameState.selectedCardPosition
+      });
+      
+      // Keep the visual selection active until the server confirms the draw
+      // The selected state will be cleared in the cardDrawn or error handlers
+      
+      // Only hide the button (but keep the card selected visually)
+      container.classList.add('hidden');
+    }
+  });
+  
+  container.appendChild(drawBtn);
 }
 
 // Add a new function to render all players' pairs
@@ -1453,8 +1616,44 @@ function renderAllPlayersPairs() {
 
 // Simple sound effects function
 function playSound(type) {
-  // Only implement if needed, could be a distraction
-  // This is a placeholder for potential sound effects
+  try {
+    // Create audio element or reuse existing one
+    let audio = document.getElementById(`sound-${type}`);
+    
+    if (!audio) {
+      audio = document.createElement('audio');
+      audio.id = `sound-${type}`;
+      audio.preload = 'auto';
+      document.body.appendChild(audio);
+    }
+    
+    // Set the source based on the sound type
+    switch (type) {
+      case 'match':
+        audio.src = '/sounds/match.wav';
+        break;
+      case 'draw':
+        audio.src = '/sounds/tragecarte.wav';
+        break;
+      case 'turn':
+        audio.src = '/sounds/schimba-tura.wav';
+        break;
+      case 'click':
+        // Optional - future implementation
+        return; // Skip for now as we're focusing only on specific sounds
+      default:
+        return; // Unknown sound type
+    }
+    
+    // Play the sound
+    audio.currentTime = 0; // Reset to beginning
+    audio.play().catch(error => {
+      console.log(`[Sound] Error playing ${type} sound:`, error);
+    });
+    
+  } catch (error) {
+    console.error('[Sound] Error in playSound function:', error);
+  }
 }
 
 // Add a helper function to request other players' cards info
@@ -1550,6 +1749,63 @@ function setupCardDragging() {
       cardElements.forEach(c => c.classList.remove('drag-over', 'drag-before', 'drag-after'));
     });
   });
+}
+
+// Function to get eligible players based on rules
+function getEligiblePlayersForDraw() {
+  // Get all players who are not finished and still have cards
+  const activePlayers = gameState.players.filter(p => 
+    p.id !== gameState.playerId && !gameState.finishedPlayers.includes(p.id) && p.cards > 0
+  );
+  
+  // If nextPlayerOnly rule is active, only allow drawing from the next player
+  if (gameState.gameRules.nextPlayerOnly) {
+    const currentPlayerIndex = gameState.players.findIndex(p => p.id === gameState.playerId);
+    
+    if (currentPlayerIndex !== -1) {
+      // Find the next active player in turn order
+      const totalPlayers = gameState.players.length;
+      for (let i = 1; i < totalPlayers; i++) {
+        const nextIndex = (currentPlayerIndex + i) % totalPlayers;
+        const nextPlayer = gameState.players[nextIndex];
+        
+        if (nextPlayer && !gameState.finishedPlayers.includes(nextPlayer.id) && nextPlayer.cards > 0) {
+          // Return only this player as eligible
+          return [nextPlayer];
+        }
+      }
+    }
+    
+    // No eligible next player found
+    return [];
+  }
+  
+  // If no special rule, return all active players
+  return activePlayers;
+}
+
+// Helper function to map old card names to nationality cards
+function mapOldCardNameToNew(oldName) {
+  const nameMap = {
+    'calusar': 'roman',
+    'pescar': 'vietnamez',
+    'vanator': 'german',
+    'cioban': 'mongolu',
+    'marinar': 'rus',
+    'cosmonaut': 'maghiar',
+    'doctor': 'hindus',
+    'militar': 'albanezu',
+    'mecanic': 'ceh',
+    'profesor': 'polonez',
+    'brutar': 'mexican',
+    'fotbalist': 'arab',
+    'artist': 'coreanu',
+    'bucatar': 'chinezu',
+    'muzician': 'negru',
+    'gradinar': 'german'  // Fallback mapping
+  };
+  
+  return nameMap[oldName.toLowerCase()] || oldName;
 }
 
 // Initialize the game when the page loads

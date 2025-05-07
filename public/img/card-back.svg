@@ -1,22 +1,43 @@
-<svg width="200" height="300" viewBox="0 0 200 300" xmlns="http://www.w3.org/2000/svg">
-  <!-- Background pattern -->
-  <rect width="200" height="300" fill="#4a5568" />
+<svg width="200" height="280" viewBox="0 0 200 280" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="100%" height="100%" fill="#2d3748" rx="12" ry="12" />
   
-  <!-- Decorative border -->
-  <rect x="10" y="10" width="180" height="280" fill="none" stroke="#fbd38d" stroke-width="3" />
+  <!-- Pattern -->
+  <defs>
+    <pattern id="pattern" width="20" height="20" patternUnits="userSpaceOnUse">
+      <rect width="20" height="20" fill="#2d3748" />
+      <path d="M0 0L10 10L0 20Z" fill="#4a5568" />
+      <path d="M20 0L10 10L20 20Z" fill="#4a5568" />
+      <path d="M0 0L10 10L20 0Z" fill="#4a5568" />
+      <path d="M0 20L10 10L20 20Z" fill="#4a5568" />
+    </pattern>
+  </defs>
   
-  <!-- Center pattern -->
-  <circle cx="100" cy="150" r="50" fill="none" stroke="#fbd38d" stroke-width="2" />
+  <!-- Pattern fill -->
+  <rect width="100%" height="100%" fill="url(#pattern)" rx="12" ry="12" />
   
-  <!-- Star pattern -->
-  <path d="M100,100 L120,150 L100,200 L80,150 Z" fill="#fbd38d" />
+  <!-- Border glow -->
+  <rect width="100%" height="100%" fill="none" stroke="#6366f1" stroke-width="4" rx="12" ry="12" stroke-opacity="0.15" />
   
-  <!-- Text "Păcălici" -->
-  <text x="100" y="80" font-family="Arial, sans-serif" font-size="18" text-anchor="middle" fill="#fbd38d">Păcălici</text>
+  <!-- Letter P in center -->
+  <text x="50%" y="53%" fill="#4c1d95" font-family="serif" font-size="90" font-weight="bold" text-anchor="middle" opacity="0.25">P</text>
   
-  <!-- Corner decorations -->
-  <circle cx="30" cy="30" r="12" fill="#fbd38d" />
-  <circle cx="170" cy="30" r="12" fill="#fbd38d" />
-  <circle cx="30" cy="270" r="12" fill="#fbd38d" />
-  <circle cx="170" cy="270" r="12" fill="#fbd38d" />
+  <!-- Decorative corners -->
+  <path d="M20 12 Q12 12 12 20" stroke="#8b5cf6" stroke-width="3" fill="none" />
+  <path d="M180 12 Q188 12 188 20" stroke="#8b5cf6" stroke-width="3" fill="none" />
+  <path d="M20 268 Q12 268 12 260" stroke="#8b5cf6" stroke-width="3" fill="none" />
+  <path d="M180 268 Q188 268 188 260" stroke="#8b5cf6" stroke-width="3" fill="none" />
+  
+  <!-- Decorative lines -->
+  <rect x="30" y="12" width="140" height="3" rx="1.5" fill="#4c1d95" fill-opacity="0.3" />
+  <rect x="30" y="265" width="140" height="3" rx="1.5" fill="#4c1d95" fill-opacity="0.3" />
+  
+  <!-- Subtle gradient overlay -->
+  <rect width="100%" height="100%" fill="url(#grad)" rx="12" ry="12" />
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:white;stop-opacity:0.1" />
+      <stop offset="100%" style="stop-color:white;stop-opacity:0" />
+    </linearGradient>
+  </defs>
 </svg> 
