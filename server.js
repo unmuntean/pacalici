@@ -152,14 +152,24 @@ io.on('connection', (socket) => {
     
     const player = game.players[playerIndex];
     
+    // Log received cards
+    console.log(`[Server] Pair declaration received from ${player.username}:`, card1, card2);
+    
     // Verify that the player has these cards
     const cardIndex1 = player.cards.findIndex(c => c.id === card1.id);
     const cardIndex2 = player.cards.findIndex(c => c.id === card2.id);
     
     if (cardIndex1 === -1 || cardIndex2 === -1) {
+      console.log(`[Server] Player does not have the declared cards. Indices:`, cardIndex1, cardIndex2);
       socket.emit('error', 'You do not have these cards');
       return;
     }
+    
+    // Log the actual cards from player's hand
+    console.log(`[Server] Found cards in player's hand:`, 
+      player.cards[cardIndex1], 
+      player.cards[cardIndex2]
+    );
     
     // Check if the cards form a valid pair
     if (isPair(player.cards[cardIndex1], player.cards[cardIndex2])) {
@@ -436,6 +446,183 @@ io.on('connection', (socket) => {
     // End turn
     endTurn(game, roomId);
   });
+
+  // Refine the rearrangeCards event handler for robustness
+  socket.on('rearrangeCards', ({ newOrder }) => {
+    const roomId = userRooms[socket.id];
+    if (!roomId || !games[roomId]) {
+      socket.emit('error', 'Game room not found');
+      return;
+    }
+    
+    const game = games[roomId];
+    
+    // Find the player
+    const playerIndex = game.players.findIndex(p => p.id === socket.id);
+    if (playerIndex === -1) {
+      socket.emit('error', 'Player not found');
+      return;
+    }
+    
+    const player = game.players[playerIndex];
+    const currentCardCount = player.cards.length;
+
+    // Validate the new order array
+    if (!Array.isArray(newOrder) || newOrder.length !== currentCardCount) {
+      console.error(`Rearrange validation failed: Length mismatch. Expected ${currentCardCount}, got ${newOrder ? newOrder.length : 'null'}. Order:`, newOrder);
+      socket.emit('error', 'Invalid card order: size mismatch');
+      return;
+    }
+    
+    // Check if all indices are valid (0 to length-1) and unique
+    const receivedIndices = new Set(newOrder);
+    if (receivedIndices.size !== currentCardCount) {
+      console.error(`Rearrange validation failed: Duplicate or missing indices. Received:`, newOrder);
+      socket.emit('error', 'Invalid card order: duplicate/missing indices');
+      return;
+    }
+
+    for (const index of newOrder) {
+      if (typeof index !== 'number' || index < 0 || index >= currentCardCount || !Number.isInteger(index)) {
+        console.error(`Rearrange validation failed: Invalid index found: ${index}. Order:`, newOrder);
+        socket.emit('error', 'Invalid card order: invalid index value');
+        return;
+      }
+    }
+
+    // If validation passes, rearrange the cards
+    try {
+      const currentCards = [...player.cards]; // Create a copy
+      const rearrangedCards = newOrder.map(originalIndex => currentCards[originalIndex]);
+      player.cards = rearrangedCards;
+
+      console.log(`Player ${player.username} successfully rearranged cards. New order mapping (new index -> original index):`, newOrder);
+      
+      // Notify the player that their cards have been rearranged
+      socket.emit('cardsRearranged', { cards: player.cards });
+
+      // Notify other players about the card count (positions don't change for them)
+      const playersInfo = game.players.map(p => ({
+        id: p.id,
+        username: p.username,
+        cardCount: p.cards.length,
+        cardPositions: p.cards.map((_, index) => index)
+      }));
+      io.to(roomId).emit('playersCardsInfo', { playersInfo });
+
+    } catch (error) {
+      console.error("Error during card rearrangement:", error);
+      socket.emit('error', 'Failed to rearrange cards');
+    }
+  });
+
+  // Fix the drawCardFromPlayer handler to properly update cards and notify all players
+  socket.on('drawCardFromPlayer', ({ fromPlayerId, cardPosition }) => {
+    const roomId = userRooms[socket.id];
+    if (!roomId || !games[roomId]) {
+      socket.emit('error', 'Game room not found');
+      return;
+    }
+    
+    const game = games[roomId];
+    
+    // Check if it's the player's turn
+    const playerIndex = game.players.findIndex(p => p.id === socket.id);
+    if (playerIndex === -1 || game.currentTurn !== playerIndex) {
+      socket.emit('error', 'Not your turn');
+      return;
+    }
+    
+    // Check if deck is empty (should be, but verify)
+    if (game.deck.length > 0) {
+      socket.emit('error', 'Deck is not empty yet');
+      return;
+    }
+    
+    // Find the player to draw from
+    const fromPlayerIndex = game.players.findIndex(p => p.id === fromPlayerId);
+    if (fromPlayerIndex === -1) {
+      socket.emit('error', 'Player not found');
+      return;
+    }
+    
+    const fromPlayer = game.players[fromPlayerIndex];
+    
+    // Check if the player has cards
+    if (!fromPlayer.cards || fromPlayer.cards.length === 0) {
+      socket.emit('error', 'This player has no cards');
+      return;
+    }
+    
+    // Check if the card position is valid
+    if (cardPosition < 0 || cardPosition >= fromPlayer.cards.length) {
+      console.log(`Invalid card position: ${cardPosition}, player ${fromPlayer.username} has ${fromPlayer.cards.length} cards`);
+      socket.emit('error', 'Invalid card position');
+      return;
+    }
+    
+    // Take the card from the specified position
+    const card = fromPlayer.cards.splice(cardPosition, 1)[0];
+    
+    // Add the card to the current player's hand
+    game.players[playerIndex].cards.push(card);
+    
+    console.log(`Player ${game.players[playerIndex].username} drew card at position ${cardPosition} from ${fromPlayer.username}`);
+    
+    // Notify the current player of their new card
+    socket.emit('cardDrawn', { 
+      card, 
+      fromPlayer: fromPlayer.username,
+      fromPosition: cardPosition
+    });
+    
+    // Notify the player that a card was taken
+    io.to(fromPlayerId).emit('cardTaken', {
+      byPlayer: game.players[playerIndex].username,
+      cardCount: fromPlayer.cards.length,
+      cardPosition: cardPosition
+    });
+    
+    // Notify all players about cards count updates
+    const playersInfo = game.players.map(p => ({
+      id: p.id,
+      username: p.username,
+      cardCount: p.cards.length,
+      cardPositions: p.cards.map((_, index) => index)
+    }));
+    
+    io.to(roomId).emit('playersCardsInfo', { playersInfo });
+    
+    // Notify other players about the draw
+    io.to(roomId).emit('playerDrawFromPlayer', {
+      playerId: socket.id,
+      fromPlayerId: fromPlayer.id,
+      fromPosition: cardPosition
+    });
+    
+    // End turn
+    endTurn(game, roomId);
+  });
+
+  // Update the playersCardsCount event to include card positions
+  socket.on('getPlayersCards', () => {
+    const roomId = userRooms[socket.id];
+    if (!roomId || !games[roomId]) return;
+    
+    const game = games[roomId];
+    
+    // Get detailed info about other players' cards (without revealing the actual cards)
+    const playersCardsInfo = game.players.map(p => ({
+      id: p.id,
+      username: p.username,
+      cardCount: p.cards.length,
+      // Include card positions but not the actual card data
+      cardPositions: p.cards.map((_, index) => index)
+    }));
+    
+    // Send only to the requesting player
+    socket.emit('playersCardsInfo', { playersCardsInfo });
+  });
 });
 
 // Game logic functions
@@ -454,38 +641,38 @@ function createDeck() {
   
   // 16 pairs (boy-girl) + 1 trickster card
   const pairs = [
-    { name: 'calusar', type: 'boy' },
-    { name: 'calusar', type: 'girl' },
-    { name: 'pescar', type: 'boy' },
-    { name: 'pescar', type: 'girl' },
-    { name: 'vanator', type: 'boy' },
-    { name: 'vanator', type: 'girl' },
+    { name: 'albanezu', type: 'boy' },
+    { name: 'albanezu', type: 'girl' },
+    { name: 'ceh', type: 'boy' },
+    { name: 'ceh', type: 'girl' },
+    { name: 'chinezu', type: 'boy' },
+    { name: 'chinezu', type: 'girl' },
+    { name: 'coreanu', type: 'boy' },
+    { name: 'coreanu', type: 'girl' },
+    { name: 'mexican', type: 'boy' },
+    { name: 'mexican', type: 'girl' },
+    { name: 'mongolu', type: 'boy' },
+    { name: 'mongolu', type: 'girl' },
+    { name: 'roman', type: 'boy' },
+    { name: 'roman', type: 'girl' },
     { name: 'gradinar', type: 'boy' },
     { name: 'gradinar', type: 'girl' },
-    { name: 'cioban', type: 'boy' },
-    { name: 'cioban', type: 'girl' },
-    { name: 'marinar', type: 'boy' },
-    { name: 'marinar', type: 'girl' },
-    { name: 'cosmonaut', type: 'boy' },
-    { name: 'cosmonaut', type: 'girl' },
-    { name: 'doctor', type: 'boy' },
-    { name: 'doctor', type: 'girl' },
-    { name: 'militar', type: 'boy' },
-    { name: 'militar', type: 'girl' },
-    { name: 'mecanic', type: 'boy' },
-    { name: 'mecanic', type: 'girl' },
-    { name: 'profesor', type: 'boy' },
-    { name: 'profesor', type: 'girl' },
-    { name: 'brutar', type: 'boy' },
-    { name: 'brutar', type: 'girl' },
-    { name: 'fotbalist', type: 'boy' },
-    { name: 'fotbalist', type: 'girl' },
     { name: 'artist', type: 'boy' },
     { name: 'artist', type: 'girl' },
-    { name: 'bucatar', type: 'boy' },
-    { name: 'bucatar', type: 'girl' },
     { name: 'muzician', type: 'boy' },
     { name: 'muzician', type: 'girl' },
+    { name: 'cioban', type: 'boy' },
+    { name: 'cioban', type: 'girl' },
+    { name: 'doctor', type: 'boy' },
+    { name: 'doctor', type: 'girl' },
+    { name: 'marinar', type: 'boy' },
+    { name: 'marinar', type: 'girl' },
+    { name: 'profesor', type: 'boy' },
+    { name: 'profesor', type: 'girl' },
+    { name: 'bucatar', type: 'boy' },
+    { name: 'bucatar', type: 'girl' },
+    { name: 'fotbalist', type: 'boy' },
+    { name: 'fotbalist', type: 'girl' },
     { name: 'pacalici', type: 'trickster' }
   ];
   
@@ -507,13 +694,44 @@ function createDeck() {
   return deck;
 }
 
+// Add a utility function to normalize card data
+function normalizeCardData(card) {
+  // Make a copy to avoid modifying the original
+  const normalizedCard = {...card};
+  
+  // Ensure name is lowercase for consistent comparison
+  if (normalizedCard.name) {
+    normalizedCard.name = normalizedCard.name.toLowerCase();
+  }
+  
+  // Ensure type is one of the expected values
+  if (normalizedCard.type && !['boy', 'girl', 'trickster'].includes(normalizedCard.type)) {
+    console.warn(`[Server Normalize] Unexpected card type: ${normalizedCard.type}`);
+  }
+  
+  return normalizedCard;
+}
+
 function isPair(card1, card2) {
+  // Normalize card data
+  const normalizedCard1 = normalizeCardData(card1);
+  const normalizedCard2 = normalizeCardData(card2);
+  
+  // Add debug logging
+  console.log("[Server Pair Check]", 
+    "Card1:", normalizedCard1.name, normalizedCard1.type, 
+    "Card2:", normalizedCard2.name, normalizedCard2.type, 
+    "Same name:", normalizedCard1.name === normalizedCard2.name,
+    "Different types:", normalizedCard1.type !== normalizedCard2.type,
+    "Not trickster:", normalizedCard1.type !== 'trickster' && normalizedCard2.type !== 'trickster'
+  );
+  
   // Cards form a pair if they have the same name but different types (boy/girl)
   return (
-    card1.name === card2.name &&
-    card1.type !== card2.type &&
-    card1.type !== 'trickster' &&
-    card2.type !== 'trickster'
+    normalizedCard1.name === normalizedCard2.name &&
+    normalizedCard1.type !== normalizedCard2.type &&
+    normalizedCard1.type !== 'trickster' &&
+    normalizedCard2.type !== 'trickster'
   );
 }
 

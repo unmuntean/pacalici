@@ -13,6 +13,10 @@ const gameState = {
   isMyTurn: false,
   isDeckEmpty: false,
   selectedPlayerForDraw: null,
+  selectedCardPosition: null,
+  isDragging: false,
+  draggedCard: null,
+  draggedCardIndex: null,
 };
 
 // DOM elements
@@ -58,8 +62,9 @@ const elements = {
   closeRulesBtn: document.getElementById('close-rules')
 };
 
-// Icons for different card types (simplified version)
+// Icons for different card types (fallbacks for cards without images)
 const cardIcons = {
+  // Keeping these emoji icons as fallbacks
   calusar: '👨‍🎤',
   pescar: '🎣',
   vanator: '🔫',
@@ -76,13 +81,133 @@ const cardIcons = {
   artist: '🎨',
   bucatar: '👨‍🍳',
   muzician: '🎵',
-  pacalici: '🃏'
+  // Trickster always has an image, but keeping as fallback
+  pacalici: '🃏',
+  // New card types that have images
+  albanezu: '👤',
+  ceh: '👤',
+  chinezu: '👤',
+  coreanu: '👤',
+  mexican: '👤',
+  mongolu: '👤',
+  roman: '👤'
 };
+
+// Images for different card types (mapping to actual image files)
+const cardImages = {
+  albanezu: {
+    boy: '/img/albanezu.png',
+    girl: '/img/albaneza.png'
+  },
+  ceh: {
+    boy: '/img/ceh.png',
+    girl: '/img/ceha.png'
+  },
+  chinezu: {
+    boy: '/img/chinezu.png',
+    girl: '/img/chineza.png'
+  },
+  coreanu: {
+    boy: '/img/coreanu.png',
+    girl: '/img/coreana.png'
+  },
+  mexican: {
+    boy: '/img/mexican.png',
+    girl: '/img/mexicana.png'
+  },
+  mongolu: {
+    boy: '/img/mongolu.png',
+    girl: '/img/mongola.png'
+  },
+  roman: {
+    boy: '/img/roman.png',
+    girl: '/img/romanca.png'
+  },
+  // Add the other card types that need images
+  artist: {
+    boy: '/img/artist.png',
+    girl: '/img/artist.png'
+  },
+  vanator: {
+    boy: '/img/vanator.png',
+    girl: '/img/vanator.png'
+  },
+  cioban: {
+    boy: '/img/cioban.png',
+    girl: '/img/cioban.png'
+  },
+  muzician: {
+    boy: '/img/muzician.png',
+    girl: '/img/muzician.png'
+  },
+  calusar: {
+    boy: '/img/calusar.png',
+    girl: '/img/calusar.png'
+  },
+  cosmonaut: {
+    boy: '/img/cosmonaut.png',
+    girl: '/img/cosmonaut.png'
+  },
+  fotbalist: {
+    boy: '/img/fotbalist.png',
+    girl: '/img/fotbalist.png'
+  },
+  profesor: {
+    boy: '/img/profesor.png',
+    girl: '/img/profesor.png'
+  },
+  mecanic: {
+    boy: '/img/mecanic.png',
+    girl: '/img/mecanic.png'
+  },
+  doctor: {
+    boy: '/img/doctor.png',
+    girl: '/img/doctor.png'
+  },
+  gradinar: {
+    boy: '/img/gradinar.png',
+    girl: '/img/gradinar.png'
+  },
+  marinar: {
+    boy: '/img/marinar.png',
+    girl: '/img/marinar.png'
+  },
+  bucatar: {
+    boy: '/img/bucatar.png',
+    girl: '/img/bucatar.png'
+  },
+  pacalici: {
+    trickster: '/img/pacalici.png'
+  }
+};
+
+// Add a function to check if images exist and log issues
+function preloadCardImages() {
+  console.log("[Image Debug] Starting image preload check");
+  
+  // Check for each card type
+  for (const [cardName, cardTypes] of Object.entries(cardImages)) {
+    for (const [type, imagePath] of Object.entries(cardTypes)) {
+      // Create an image element to test loading
+      const img = new Image();
+      img.onload = () => {
+        console.log(`[Image Debug] Successfully loaded: ${imagePath}`);
+      };
+      img.onerror = () => {
+        console.error(`[Image Debug] Failed to load: ${imagePath}`);
+      };
+      img.src = imagePath;
+    }
+  }
+}
 
 // Initialize the game
 function initGame() {
   // Connect to the server
   gameState.socket = io();
+  
+  // Check image loading
+  preloadCardImages();
   
   // Set up event listeners
   setupSocketListeners();
@@ -179,11 +304,13 @@ function setupSocketListeners() {
   
   // Cards dealt
   socket.on('dealtCards', ({ cards }) => {
+    console.log("[Socket Event] Received dealtCards:", cards);
     gameState.myCards = cards;
     renderPlayerCards();
     
-    // Update deck count
-    elements.gameBoard.deckCount.textContent = 29 - (cards.length * gameState.players.length);
+    // Update deck count - This calculation might be slightly off if players joined/left mid-deal
+    // Let's rely on server-sent deck counts instead.
+    // elements.gameBoard.deckCount.textContent = 29 - (cards.length * gameState.players.length);
   });
   
   // Turn changed
@@ -205,7 +332,8 @@ function setupSocketListeners() {
   });
   
   // Card drawn
-  socket.on('cardDrawn', ({ card, fromPlayer }) => {
+  socket.on('cardDrawn', ({ card, fromPlayer, fromPosition }) => {
+    console.log("[Socket Event] Received cardDrawn:", card, "from:", fromPlayer || 'Deck');
     // Add card to hand
     gameState.myCards.push(card);
     
@@ -213,26 +341,47 @@ function setupSocketListeners() {
     renderPlayerCards();
     
     if (fromPlayer) {
-      showNotification(`Ai tras o carte de la ${fromPlayer}`);
-      // Reset selected player
+      showNotification(`Ai tras cartea #${fromPosition + 1} de la ${fromPlayer}`);
+      // Reset selection
       gameState.selectedPlayerForDraw = null;
-      // Re-render other players' cards
-      renderOtherPlayersCards();
+      gameState.selectedCardPosition = null;
+      
+      // Explicitly request and re-render other players' cards state after drawing
+      console.log("[Rendering] Triggering requestOtherPlayersCards after drawing from player.");
+      requestOtherPlayersCards(); 
+      
+      // Update draw button text back to default
+      checkTurn(); 
+
     } else {
       showNotification('Ai tras o carte din pachet');
       
-      // Update deck count
-      const deckCount = parseInt(elements.gameBoard.deckCount.textContent) - 1;
-      elements.gameBoard.deckCount.textContent = deckCount;
+      // Update deck count (assuming server sends deckCountUpdated separately)
+      // const deckCount = parseInt(elements.gameBoard.deckCount.textContent) - 1;
+      // elements.gameBoard.deckCount.textContent = deckCount;
     }
   });
   
   // Card taken from you
-  socket.on('cardTaken', ({ byPlayer, cardCount }) => {
-    showNotification(`${byPlayer} a luat o carte de la tine`);
+  socket.on('cardTaken', ({ byPlayer, cardCount, cardPosition }) => {
+    showNotification(`${byPlayer} a luat cartea ta de pe poziția ${cardPosition + 1}`);
     
-    // Re-render your cards
+    // --- FIX: Remove the card from the local game state --- 
+    if (gameState.myCards && gameState.myCards.length > cardPosition) {
+      const removedCard = gameState.myCards.splice(cardPosition, 1)[0];
+      console.log(`[Card Taken] Removed card from my hand at position ${cardPosition}:`, removedCard);
+    } else {
+      console.error(`[Card Taken] Error: Invalid cardPosition ${cardPosition} or myCards array issue.`);
+    }
+    // -------------------------------------------------------
+
+    // Re-render your cards to reflect the removal
     renderPlayerCards();
+    
+    // Request updated info for other players if deck is empty (less critical now, but good for sync)
+    if (gameState.isDeckEmpty) {
+      requestOtherPlayersCards(); 
+    }
   });
   
   // Player drew from another player
@@ -320,7 +469,8 @@ function setupSocketListeners() {
     if (deckCount === 0 && !gameState.isDeckEmpty) {
       gameState.isDeckEmpty = true;
       showNotification('Pachetul de cărți este gol! Acum tragi cărți de la alți jucători.');
-      renderOtherPlayersCards();
+      requestOtherPlayersCards();
+      renderPlayerCards(); // Re-render to add drag functionality
     }
   });
   
@@ -338,6 +488,43 @@ function setupSocketListeners() {
     if (gameState.isDeckEmpty) {
       renderOtherPlayersCards();
     }
+  });
+  
+  // Handle detailed players cards info
+  socket.on('playersCardsInfo', ({ playersCardsInfo }) => {
+    console.log("[Socket Event] Received playersCardsInfo:", playersCardsInfo);
+    let stateChanged = false;
+    // Update the players' cards info in the game state
+    playersCardsInfo.forEach(playerInfo => {
+      const player = gameState.players.find(p => p.id === playerInfo.id);
+      if (player) {
+        // Update card count and positions only if they changed
+        if (player.cards !== playerInfo.cardCount || JSON.stringify(player.cardPositions) !== JSON.stringify(playerInfo.cardPositions)) {
+            player.cards = playerInfo.cardCount; 
+            player.cardPositions = playerInfo.cardPositions;
+            console.log(`[State Update] Updated player ${player.username}: count=${player.cards}, positions=`, player.cardPositions);
+            stateChanged = true;
+        }
+      } else {
+        console.warn("Player not found in gameState for info:", playerInfo);
+      }
+    });
+    
+    // Re-render the display of other players' cards if the state actually changed
+    if (stateChanged && gameState.isDeckEmpty) {
+        console.log("[Rendering] Triggering renderOtherPlayersCards due to playersCardsInfo update.");
+        renderOtherPlayersCards();
+    }
+    
+    // Also update the main player list 
+    updateGamePlayersList();
+  });
+  
+  // Add a handler for cards rearranged
+  socket.on('cardsRearranged', ({ cards }) => {
+    gameState.myCards = cards;
+    renderPlayerCards();
+    showNotification('Ordinea cărților a fost schimbată');
   });
   
   // Error handling
@@ -381,11 +568,22 @@ function setupUIListeners() {
   // Draw card button
   elements.gameBoard.drawCardBtn.addEventListener('click', () => {
     if (gameState.isMyTurn) {
-      if (gameState.isDeckEmpty && gameState.selectedPlayerForDraw) {
-        // If deck is empty and a player is selected, draw from that player
-        gameState.socket.emit('drawFromPlayer', {
-          fromPlayerId: gameState.selectedPlayerForDraw
-        });
+      if (gameState.isDeckEmpty) {
+        if (gameState.selectedPlayerForDraw !== null && gameState.selectedCardPosition !== null) {
+          console.log('Drawing card from player:', gameState.selectedPlayerForDraw, 'position:', gameState.selectedCardPosition);
+          
+          // Draw specific card from player
+          gameState.socket.emit('drawCardFromPlayer', {
+            fromPlayerId: gameState.selectedPlayerForDraw,
+            cardPosition: gameState.selectedCardPosition
+          });
+          
+          // Reset selection after drawing
+          gameState.selectedPlayerForDraw = null;
+          gameState.selectedCardPosition = null;
+        } else {
+          showNotification('Selectează o carte de la un jucător', 'error');
+        }
       } else {
         // Normal draw from deck
         gameState.socket.emit('drawCard');
@@ -495,6 +693,7 @@ function updateGamePlayersList() {
   // Add each player
   gameState.players.forEach(player => {
     const isCurrent = player.id === gameState.currentTurn;
+    const isYou = player.id === gameState.playerId;
     
     const listItem = document.createElement('li');
     listItem.classList.add('player-indicator');
@@ -507,12 +706,12 @@ function updateGamePlayersList() {
       <div class="player-avatar">${player.username.substring(0, 1).toUpperCase()}</div>
       <div class="flex-1">
         <div class="flex justify-between items-center">
-          <span>${player.username}</span>
-          <span class="text-sm ${player.id === gameState.playerId ? 'text-blue-500' : ''}">${player.id === gameState.playerId ? 'Tu' : ''}</span>
+          <span class="text-gray-200">${player.username}</span>
+          ${isYou ? '<span class="text-sm text-blue-400">Tu</span>' : ''}
         </div>
-        <div class="text-sm text-gray-500">Perechi: ${player.pairs}</div>
+        <div class="text-sm text-gray-400">Perechi: ${player.pairs || 0}</div>
       </div>
-      ${isCurrent ? '<div class="ml-2 w-2 h-2 bg-yellow-500 rounded-full"></div>' : ''}
+      ${isCurrent ? '<div class="your-turn-indicator ml-2">➤</div>' : ''}
     `;
     
     elements.gameBoard.playersList.appendChild(listItem);
@@ -536,10 +735,18 @@ function checkTurn() {
   if (gameState.isMyTurn) {
     elements.gameBoard.actionButtons.classList.remove('hidden');
     
-    // Update draw card button text based on deck state
+    // Update draw card button text based on deck state and selection
     if (gameState.isDeckEmpty) {
-      elements.gameBoard.drawCardBtn.textContent = gameState.selectedPlayerForDraw ? 
-        'Trage o carte selectată' : 'Selectează o carte de la un jucător';
+      if (gameState.selectedPlayerForDraw && gameState.selectedCardPosition !== null) {
+        const selectedPlayer = gameState.players.find(p => p.id === gameState.selectedPlayerForDraw);
+        if (selectedPlayer) {
+          elements.gameBoard.drawCardBtn.innerHTML = `<span>Trage cartea #${gameState.selectedCardPosition + 1} de la ${selectedPlayer.username}</span>`;
+        } else {
+          elements.gameBoard.drawCardBtn.textContent = 'Selectează o carte';
+        }
+      } else {
+        elements.gameBoard.drawCardBtn.textContent = 'Selectează o carte de la un jucător';
+      }
     } else {
       elements.gameBoard.drawCardBtn.textContent = 'Trage o carte';
     }
@@ -549,7 +756,7 @@ function checkTurn() {
   
   // Update the other players' cards UI if deck is empty
   if (gameState.isDeckEmpty) {
-    renderOtherPlayersCards();
+    requestOtherPlayersCards();
   }
 }
 
@@ -557,8 +764,24 @@ function renderPlayerCards() {
   // Clear the container
   elements.gameBoard.playerCards.innerHTML = '';
   
+  // Add 'reorder cards' instruction if deck is empty
+  if (gameState.isDeckEmpty && gameState.myCards.length > 1) {
+    const reorderInstructions = document.createElement('div');
+    reorderInstructions.className = 'flex items-center justify-between mb-2 text-sm text-gray-400 bg-gray-700 bg-opacity-50 p-2 rounded';
+    reorderInstructions.innerHTML = `
+      <span>Trage pentru a rearanja cărțile (ascunde Păcăliciul)</span>
+      <span class="ml-2 text-yellow-400">↔️</span>
+    `;
+    elements.gameBoard.playerCards.appendChild(reorderInstructions);
+  }
+  
+  console.log("[Render] Rendering myCards. Current cards in gameState:", JSON.parse(JSON.stringify(gameState.myCards)));
+  
   // Add each card
-  gameState.myCards.forEach(card => {
+  gameState.myCards.forEach((card, index) => {
+    // --- Add Log Here --- 
+    console.log(`[Render] Rendering card at index ${index}: Name=${card.name}, Type=${card.type}, ID=${card.id}`);
+    // ---------------------
     const isSelected = gameState.selectedCards.some(c => c.id === card.id);
     
     const cardElement = document.createElement('div');
@@ -568,28 +791,108 @@ function renderPlayerCards() {
       cardElement.classList.add('selected');
     }
     
-    // Get icon for card
-    const icon = cardIcons[card.name] || '❓';
+    // Add drag attributes for rearranging
+    if (gameState.isDeckEmpty && gameState.myCards.length > 1) {
+      cardElement.setAttribute('draggable', 'true');
+      cardElement.dataset.index = index;
+    }
     
-    cardElement.innerHTML = `
-      <div class="card-inner">
-        <div class="card-front ${card.type}">
-          <div class="card-icon">${icon}</div>
-          <div class="card-name">${formatCardName(card.name)}</div>
-          <div class="card-type">${formatCardType(card.type)}</div>
+    // Normalize card data
+    const normalizedCard = normalizeCardData(card);
+    
+    // Get the image for the card
+    let cardImageSrc = '';
+    
+    console.log(`[Card Debug] Rendering card: ${card.name} (${normalizedCard.name}), type: ${card.type} (${normalizedCard.type})`);
+    
+    try {
+      if (normalizedCard.name === 'pacalici') {
+        // Trickster card always uses the trickster image
+        cardImageSrc = cardImages.pacalici.trickster;
+        console.log(`[Card Render] Using trickster image: ${cardImageSrc}`);
+      } else if (cardImages[normalizedCard.name] && cardImages[normalizedCard.name][normalizedCard.type]) {
+        // We have an image for this specific card name and type
+        cardImageSrc = cardImages[normalizedCard.name][normalizedCard.type];
+        console.log(`[Card Render] Found exact image for ${normalizedCard.name}/${normalizedCard.type}: ${cardImageSrc}`);
+      } else {
+        // Fallback to emoji
+        const icon = cardIcons[normalizedCard.name] || '❓';
+        console.log(`[Card Render] No image mapping found for ${normalizedCard.name}/${normalizedCard.type}, using emoji: ${icon}`);
+        cardImageSrc = '';
+      }
+    } catch (err) {
+      console.error('[Card Render] Error getting card image:', err);
+      cardImageSrc = '';
+    }
+    
+    // Add position indicator if deck is empty
+    const positionIndicator = gameState.isDeckEmpty ? 
+      `<div class="card-position-indicator">${index + 1}</div>` : '';
+    
+    if (cardImageSrc) {
+      // Use image for card with error handling
+      cardElement.innerHTML = `
+        ${positionIndicator}
+        <div class="card-inner">
+          <div class="card-front ${normalizedCard.type}">
+            <div class="card-name">${formatCardName(normalizedCard.name)}</div>
+            <img 
+              src="${cardImageSrc}" 
+              alt="${formatCardName(normalizedCard.name)}" 
+              class="card-img" 
+              onerror="console.error('[Image Error] Failed to load: ' + this.src); this.onerror=null; this.src=''; this.style.display='none'; this.parentElement.querySelector('.card-icon').style.display='block';"
+            >
+            <div class="card-icon" style="display: none;">${cardIcons[normalizedCard.name] || '❓'}</div>
+            <div class="card-type">${formatCardType(normalizedCard.type)}</div>
+          </div>
         </div>
-      </div>
-    `;
+      `;
+      
+      // Verify image loading
+      const img = new Image();
+      img.onload = () => {
+        console.log(`[Image Verify] Successfully loaded: ${cardImageSrc}`);
+      };
+      img.onerror = () => {
+        console.error(`[Image Verify] Failed to load: ${cardImageSrc}`);
+        // Find the element and show fallback
+        const imgEl = cardElement.querySelector('.card-img');
+        const iconEl = cardElement.querySelector('.card-icon');
+        if (imgEl && iconEl) {
+          imgEl.style.display = 'none';
+          iconEl.style.display = 'block';
+        }
+      };
+      img.src = cardImageSrc;
+    } else {
+      // Fallback to emoji
+      const icon = cardIcons[normalizedCard.name] || '❓';
+      cardElement.innerHTML = `
+        ${positionIndicator}
+        <div class="card-inner">
+          <div class="card-front ${normalizedCard.type}">
+            <div class="card-name">${formatCardName(normalizedCard.name)}</div>
+            <div class="card-icon">${icon}</div>
+            <div class="card-type">${formatCardType(normalizedCard.type)}</div>
+          </div>
+        </div>
+      `;
+    }
     
-    // Add click event
+    // Add click event for selecting to form pairs
     cardElement.addEventListener('click', () => {
-      if (!gameState.isMyTurn) return;
+      if (!gameState.isMyTurn || gameState.isDragging) return;
+      
+      // Add sound effect for card selection
+      playSound('click');
       
       if (isSelected) {
         // Deselect
+        console.log("[Card Deselected]", card);
         gameState.selectedCards = gameState.selectedCards.filter(c => c.id !== card.id);
       } else {
         // Select, but limit to 2 cards
+        console.log("[Card Selected]", card);
         if (gameState.selectedCards.length < 2) {
           gameState.selectedCards.push(card);
         } else {
@@ -605,14 +908,21 @@ function renderPlayerCards() {
       // Check if we have 2 cards selected and they form a pair
       if (gameState.selectedCards.length === 2) {
         const [card1, card2] = gameState.selectedCards;
+        console.log("[Checking Pair]", card1, card2);
         
         // Check if they form a pair
         if (isPair(card1, card2)) {
+          // Play pair match sound
+          playSound('match');
+          console.log("[Pair Matched] Sending to server");
+          
           // Declare the pair
           gameState.socket.emit('declarePair', {
             card1,
             card2
           });
+        } else {
+          console.log("[Pair Failed] Cards don't form a valid pair");
         }
       }
     });
@@ -620,14 +930,19 @@ function renderPlayerCards() {
     elements.gameBoard.playerCards.appendChild(cardElement);
   });
   
-  // Add placeholders if less than 4 cards
+  // Add placeholders if no cards
   if (gameState.myCards.length === 0) {
     const placeholder = document.createElement('div');
     placeholder.classList.add('card-placeholder');
     placeholder.innerHTML = `
-      <p>Nu mai ai cărți</p>
+      <p class="text-gray-400">Nu mai ai cărți</p>
     `;
     elements.gameBoard.playerCards.appendChild(placeholder);
+  }
+  
+  // Setup drag-and-drop for rearranging if deck is empty
+  if (gameState.isDeckEmpty) {
+    setupCardDragging();
   }
 }
 
@@ -638,22 +953,41 @@ function renderPairs() {
   // Add each pair
   gameState.myPairs.forEach(pair => {
     const pairElement = document.createElement('div');
-    pairElement.classList.add('flex', 'space-x-1', 'mb-2', 'p-2', 'bg-green-50', 'rounded-md');
+    pairElement.classList.add('pair-item');
     
     // Create elements for each card in the pair
     pair.forEach(card => {
       const cardElement = document.createElement('div');
       cardElement.classList.add('w-1/2');
       
-      // Get icon for card
-      const icon = cardIcons[card.name] || '❓';
+      // Normalize card data
+      const normalizedCard = normalizeCardData(card);
       
-      cardElement.innerHTML = `
-        <div class="card-front ${card.type} h-16 flex items-center justify-center flex-col rounded-md">
-          <div class="text-lg">${icon}</div>
-          <div class="text-xs font-semibold">${formatCardName(card.name)}</div>
-        </div>
-      `;
+      // Get the image for the card
+      let cardImageSrc = '';
+      if (normalizedCard.name === 'pacalici') {
+        cardImageSrc = cardImages.pacalici.trickster;
+      } else if (cardImages[normalizedCard.name] && cardImages[normalizedCard.name][normalizedCard.type]) {
+        cardImageSrc = cardImages[normalizedCard.name][normalizedCard.type];
+      }
+      
+      if (cardImageSrc) {
+        // Use image for card - modified to be more consistent with main card style
+        cardElement.innerHTML = `
+          <div class="h-16 flex items-center justify-center overflow-hidden rounded-md bg-opacity-50 bg-gray-800">
+            <img src="${cardImageSrc}" alt="${formatCardName(normalizedCard.name)}" class="h-16 object-cover w-full">
+          </div>
+        `;
+      } else {
+        // Fallback to emoji
+        const icon = cardIcons[normalizedCard.name] || '❓';
+        cardElement.innerHTML = `
+          <div class="h-16 flex items-center justify-center flex-col rounded-md bg-opacity-50 bg-gray-800">
+            <div class="text-lg">${icon}</div>
+            <div class="text-xs font-semibold text-gray-300">${formatCardName(normalizedCard.name)}</div>
+          </div>
+        `;
+      }
       
       pairElement.appendChild(cardElement);
     });
@@ -664,41 +998,74 @@ function renderPairs() {
   // Add placeholder if no pairs
   if (gameState.myPairs.length === 0) {
     const placeholder = document.createElement('div');
-    placeholder.classList.add('col-span-full', 'text-center', 'text-gray-500', 'py-4');
+    placeholder.classList.add('col-span-full', 'text-center', 'text-gray-400', 'py-4');
     placeholder.textContent = 'Nu ai format încă nicio pereche';
     elements.gameBoard.pairsContainer.appendChild(placeholder);
   }
 }
 
 function showNotification(message, type = 'success') {
+  // Get the notification element
+  const notification = elements.notification;
+  
   // Set message
   elements.notificationText.textContent = message;
   
   // Set color based on type
   if (type === 'error') {
-    elements.notification.classList.remove('border-green-500');
-    elements.notification.classList.add('border-red-500');
+    notification.classList.add('error');
   } else {
-    elements.notification.classList.remove('border-red-500');
-    elements.notification.classList.add('border-green-500');
+    notification.classList.remove('error');
   }
   
   // Show notification with animation
-  elements.notification.classList.add('notification-show');
+  notification.classList.add('show');
   
   // Remove animation class after it finishes
   setTimeout(() => {
-    elements.notification.classList.remove('notification-show');
-  }, 3000);
+    notification.classList.remove('show');
+  }, 4000);
 }
 
+// Add a utility function to normalize card data
+function normalizeCardData(card) {
+  // Make a copy to avoid modifying the original
+  const normalizedCard = {...card};
+  
+  // Ensure name is lowercase for consistent comparison
+  if (normalizedCard.name) {
+    normalizedCard.name = normalizedCard.name.toLowerCase();
+  }
+  
+  // Ensure type is one of the expected values
+  if (normalizedCard.type && !['boy', 'girl', 'trickster'].includes(normalizedCard.type)) {
+    console.warn(`[Normalize] Unexpected card type: ${normalizedCard.type}`);
+  }
+  
+  return normalizedCard;
+}
+
+// Update isPair function to use normalized card data
 function isPair(card1, card2) {
+  // Normalize card data
+  const normalizedCard1 = normalizeCardData(card1);
+  const normalizedCard2 = normalizeCardData(card2);
+  
+  // Add debug logging
+  console.log("[Pair Check]", 
+    "Card1:", normalizedCard1.name, normalizedCard1.type, 
+    "Card2:", normalizedCard2.name, normalizedCard2.type, 
+    "Same name:", normalizedCard1.name === normalizedCard2.name,
+    "Different types:", normalizedCard1.type !== normalizedCard2.type,
+    "Not trickster:", normalizedCard1.type !== 'trickster' && normalizedCard2.type !== 'trickster'
+  );
+  
   // Cards form a pair if they have the same name but different types (boy/girl)
   return (
-    card1.name === card2.name &&
-    card1.type !== card2.type &&
-    card1.type !== 'trickster' &&
-    card2.type !== 'trickster'
+    normalizedCard1.name === normalizedCard2.name &&
+    normalizedCard1.type !== normalizedCard2.type &&
+    normalizedCard1.type !== 'trickster' &&
+    normalizedCard2.type !== 'trickster'
   );
 }
 
@@ -717,7 +1084,10 @@ function formatCardType(type) {
 // Add a new function to render other players' cards when the deck is empty
 function renderOtherPlayersCards() {
   // Only show other players' cards if the deck is empty
-  if (!gameState.isDeckEmpty) return;
+  if (!gameState.isDeckEmpty) {
+      console.log("[Render Skip] Deck is not empty, skipping renderOtherPlayersCards.");
+      return;
+  }
   
   // Create or update the container for other players' cards
   let otherPlayersContainer = document.getElementById('other-players-cards');
@@ -725,77 +1095,159 @@ function renderOtherPlayersCards() {
   if (!otherPlayersContainer) {
     otherPlayersContainer = document.createElement('div');
     otherPlayersContainer.id = 'other-players-cards';
-    otherPlayersContainer.className = 'mt-6';
+    otherPlayersContainer.className = 'other-players-container';
     
     const heading = document.createElement('h2');
-    heading.className = 'text-lg font-semibold mb-2';
+    heading.className = 'text-lg font-semibold mb-3 text-white';
     heading.textContent = 'Cărțile altor jucători';
     
-    otherPlayersContainer.appendChild(heading);
+    const subtitle = document.createElement('p');
+    subtitle.className = 'text-sm text-gray-400 mb-4';
+    subtitle.textContent = 'Selectează o carte de la un jucător. Fiecare jucător își poate rearanja cărțile.';
     
-    // Insert after your cards
-    elements.gameBoard.playerCards.parentNode.after(otherPlayersContainer);
+    otherPlayersContainer.appendChild(heading);
+    otherPlayersContainer.appendChild(subtitle);
+    
+    // Insert after player cards
+    const playerCardsContainer = document.querySelector('.bg-gray-800.rounded-lg.shadow-md.p-4.mb-4');
+    if (playerCardsContainer) {
+      playerCardsContainer.parentNode.insertBefore(otherPlayersContainer, playerCardsContainer.nextSibling);
+    }
   }
   
-  // Clear the container
-  while (otherPlayersContainer.childNodes.length > 1) {
+  // Clear the container except the heading and subtitle
+  while (otherPlayersContainer.childNodes.length > 2) {
     otherPlayersContainer.removeChild(otherPlayersContainer.lastChild);
   }
   
   // Get other players (players other than yourself)
   const otherPlayers = gameState.players.filter(p => p.id !== gameState.playerId);
   
+  // Check if we need to request updated card info (less frequent now)
+  if (otherPlayers.some(p => typeof p.cards !== 'number' || !p.cardPositions)) { 
+    console.log("[Data Check] Requesting player card info as it seems outdated or missing...");
+    requestOtherPlayersCards();
+    return; // Avoid rendering with incomplete data
+  }
+  
+  let hasPlayersWithCards = false;
   // Create a section for each player
   otherPlayers.forEach(player => {
+    // Use the COUNT stored in player.cards now
+    const cardCount = player.cards;
+    // --- Add Log Here --- 
+    console.log(`[renderOtherPlayersCards] Rendering for ${player.username}, card count from gameState: ${cardCount}`);
+    // ---------------------
+
     // Skip players with no cards
-    if (player.cards && player.cards.length === 0) return;
+    if (cardCount === 0) return;
     
+    hasPlayersWithCards = true;
     const playerSection = document.createElement('div');
-    playerSection.className = 'mb-4';
+    playerSection.className = 'other-player-section';
+    
+    const playerHeader = document.createElement('div');
+    playerHeader.className = 'flex justify-between items-center mb-2';
     
     const playerName = document.createElement('h3');
-    playerName.className = 'text-md font-medium mb-1';
-    playerName.textContent = `${player.username} - ${player.cards} cărți`;
+    playerName.className = 'text-md font-medium text-white';
+    playerName.innerHTML = `${player.username} <span class="text-gray-400">(${cardCount} cărți)</span>`;
     
-    playerSection.appendChild(playerName);
+    playerHeader.appendChild(playerName);
+    
+    // Add a selection indicator if this player is selected
+    if (player.id === gameState.selectedPlayerForDraw) {
+      const selectedIndicator = document.createElement('span');
+      selectedIndicator.className = 'text-yellow-400 text-sm';
+      selectedIndicator.textContent = 'Selectat';
+      playerHeader.appendChild(selectedIndicator);
+    }
+    
+    playerSection.appendChild(playerHeader);
     
     // Create a grid for the cards
     const cardsGrid = document.createElement('div');
-    cardsGrid.className = 'grid grid-cols-5 gap-2';
+    cardsGrid.className = 'other-player-cards';
     
-    // Create card backs for this player
-    for (let i = 0; i < player.cards; i++) {
-      const cardBack = document.createElement('div');
-      cardBack.className = 'card-back h-16 rounded-md cursor-pointer transform transition-transform hover:scale-105';
+    // Create card backs based on the COUNT
+    for (let i = 0; i < cardCount; i++) {
+      const cardContainer = document.createElement('div');
+      cardContainer.className = 'other-player-card-container';
       
-      // Add click handler to select this player for drawing
+      const cardBack = document.createElement('div');
+      cardBack.className = 'other-player-card';
+      cardBack.dataset.position = i; // Position is the index (0-based)
+      
+      // Add position number (displaying 1-based index)
+      const positionNumber = document.createElement('div');
+      positionNumber.className = 'card-position-number';
+      positionNumber.textContent = i + 1;
+      cardBack.appendChild(positionNumber);
+      
+      // Add animation effect to cards
+      cardBack.style.animationDelay = `${i * 0.05}s`;
+      
+      // Check if this card position is selected
+      if (player.id === gameState.selectedPlayerForDraw && i === gameState.selectedCardPosition) {
+        cardBack.classList.add('selected');
+      }
+      
+      // Add click handler to select this card position
       cardBack.addEventListener('click', () => {
         if (gameState.isMyTurn) {
-          // Set the selected player
+          // Set the selected player and card position
           gameState.selectedPlayerForDraw = player.id;
+          gameState.selectedCardPosition = i; // Store the 0-based index
           
-          // Update UI to show which player is selected
-          document.querySelectorAll('.card-back').forEach(card => {
-            card.classList.remove('ring-2', 'ring-blue-500');
+          console.log(`Selected card at position ${i} from player ${player.username}`);
+
+          // Update UI to show which card is selected
+          document.querySelectorAll('.other-player-card').forEach(card => {
+            card.classList.remove('selected');
           });
           
-          cardBack.classList.add('ring-2', 'ring-blue-500');
+          cardBack.classList.add('selected');
           
-          showNotification(`Selectat pentru a trage o carte de la ${player.username}`);
+          // Update the draw button text
+          if (elements.gameBoard.drawCardBtn) {
+            elements.gameBoard.drawCardBtn.innerHTML = `<span>Trage cartea #${i + 1} de la ${player.username}</span>`;
+          }
+          
+          // Show notification
+          showNotification(`Ai selectat cartea #${i + 1} de la ${player.username}`);
         }
       });
       
-      // Add selected style if this player is already selected
-      if (player.id === gameState.selectedPlayerForDraw) {
-        cardBack.classList.add('ring-2', 'ring-blue-500');
-      }
-      
-      cardsGrid.appendChild(cardBack);
+      cardContainer.appendChild(cardBack);
+      cardsGrid.appendChild(cardContainer);
     }
     
     playerSection.appendChild(cardsGrid);
     otherPlayersContainer.appendChild(playerSection);
   });
+  
+  // Add instructions container if there are players with cards
+  if (hasPlayersWithCards) {
+      const instructionsContainer = document.createElement('div');
+      instructionsContainer.className = 'mt-4 p-3 bg-gray-700 bg-opacity-50 rounded-md text-gray-300 text-sm';
+      instructionsContainer.innerHTML = `
+        <p class="mb-2"><span class="font-semibold text-yellow-400">Cum se joacă:</span> Acum că pachetul este gol, fiecare jucător trebuie să tragă o carte de la ceilalți jucători.</p>
+        <ul class="list-disc ml-5 space-y-1">
+          <li>Selectează o carte (după număr) de la un jucător, apoi apasă "Trage cartea".</li>
+          <li>Poți rearanja cărțile tale (trage și plasează) pentru a ascunde Păcăliciul.</li>
+          <li>Jucătorul care rămâne doar cu Păcăliciul pierde.</li>
+        </ul>
+      `;
+      otherPlayersContainer.appendChild(instructionsContainer);
+  }
+  
+  // Add a message if no other players have cards
+  if (!hasPlayersWithCards) {
+    const message = document.createElement('p');
+    message.className = 'text-center text-gray-400 py-4';
+    message.textContent = 'Niciun alt jucător nu are cărți.';
+    otherPlayersContainer.appendChild(message);
+  }
 }
 
 // Add a new function to render all players' pairs
@@ -807,16 +1259,19 @@ function renderAllPlayersPairs() {
   if (!allPairsContainer) {
     allPairsContainer = document.createElement('div');
     allPairsContainer.id = 'all-players-pairs';
-    allPairsContainer.className = 'bg-white rounded-lg shadow-md p-4 mt-4';
+    allPairsContainer.className = 'bg-gray-800 rounded-lg shadow-md p-4 mt-4';
     
     const heading = document.createElement('h2');
-    heading.className = 'text-lg font-semibold mb-2';
+    heading.className = 'text-lg font-semibold mb-2 text-white';
     heading.textContent = 'Perechi formate de toți jucătorii';
     
     allPairsContainer.appendChild(heading);
     
-    // Insert after the pairs container
-    elements.gameBoard.pairsContainer.parentNode.after(allPairsContainer);
+    // Insert after pairs container
+    const pairsContainer = document.querySelector('.bg-gray-800.rounded-lg.shadow-md.p-4');
+    if (pairsContainer) {
+      pairsContainer.parentNode.appendChild(allPairsContainer);
+    }
   }
   
   // Clear existing content except the heading
@@ -826,63 +1281,57 @@ function renderAllPlayersPairs() {
   
   // Create a section for each player's pairs
   gameState.players.forEach(player => {
-    if (player.pairs > 0) {
+    if (player.pairs && player.pairs > 0) {
       const playerSection = document.createElement('div');
-      playerSection.className = 'mb-3 pb-2 border-b border-gray-200';
+      playerSection.className = 'player-pairs-section';
       
       const playerName = document.createElement('h3');
-      playerName.className = 'text-md font-medium mb-1';
+      playerName.className = 'text-md font-medium text-white';
       playerName.textContent = `${player.username} - ${player.pairs} perechi`;
       
       playerSection.appendChild(playerName);
       
+      // Create a visual representation of the pairs
+      const pairsGrid = document.createElement('div');
+      pairsGrid.className = 'player-pairs-grid mt-1';
+      
       // If it's the current player, we have the actual pairs data
       if (player.id === gameState.playerId) {
-        // Add a visual representation of the pairs
-        const pairsContainer = document.createElement('div');
-        pairsContainer.className = 'grid grid-cols-2 sm:grid-cols-3 gap-2';
-        
-        gameState.myPairs.forEach(pair => {
-          const pairElement = document.createElement('div');
-          pairElement.className = 'bg-green-50 p-1 rounded-md flex space-x-1';
+        gameState.myPairs.forEach((pair, index) => {
+          const pairItem = document.createElement('div');
+          pairItem.className = 'player-pair-item';
           
-          pair.forEach(card => {
-            const cardElement = document.createElement('div');
-            cardElement.className = 'w-1/2';
+          // Try to get the image for the card
+          if (pair[0]) {
+            // Normalize the card data
+            const normalizedCard = normalizeCardData(pair[0]);
             
-            // Get icon for card
-            const icon = cardIcons[card.name] || '❓';
-            
-            cardElement.innerHTML = `
-              <div class="h-10 flex items-center justify-center flex-col rounded-md bg-white">
-                <div class="text-sm">${icon}</div>
-                <div class="text-xs">${formatCardName(card.name)}</div>
-              </div>
-            `;
-            
-            pairElement.appendChild(cardElement);
-          });
+            if (normalizedCard.name !== 'pacalici' && cardImages[normalizedCard.name]) {
+              // Use boy image for the pair visualization (conventionally)
+              const cardImageSrc = cardImages[normalizedCard.name].boy;
+              pairItem.innerHTML = `<img src="${cardImageSrc}" alt="${formatCardName(normalizedCard.name)}" class="h-8 w-8 object-contain">`;
+            } else {
+              // Fallback to emoji
+              pairItem.innerHTML = cardIcons[normalizedCard.name] || '👥';
+            }
+          } else {
+            // Default pair icon if no valid card data
+            pairItem.innerHTML = '👥';
+          }
           
-          pairsContainer.appendChild(pairElement);
+          pairsGrid.appendChild(pairItem);
         });
-        
-        playerSection.appendChild(pairsContainer);
       } else {
-        // For other players, we just show the number of pairs
-        const pairsDisplay = document.createElement('div');
-        pairsDisplay.className = 'flex flex-wrap gap-2';
-        
-        // Create a simple representation for each pair
+        // For other players, just show generic pair icons
         for (let i = 0; i < player.pairs; i++) {
-          const pairSymbol = document.createElement('div');
-          pairSymbol.className = 'bg-green-50 p-1 rounded-md flex items-center justify-center w-12 h-8';
-          pairSymbol.textContent = '👥';
-          pairsDisplay.appendChild(pairSymbol);
+          const pairItem = document.createElement('div');
+          pairItem.className = 'player-pair-item';
+          pairItem.innerHTML = '👥';
+          pairsGrid.appendChild(pairItem);
         }
-        
-        playerSection.appendChild(pairsDisplay);
       }
       
+      playerSection.appendChild(pairsGrid);
       allPairsContainer.appendChild(playerSection);
     }
   });
@@ -890,10 +1339,111 @@ function renderAllPlayersPairs() {
   // Add a message if no pairs have been formed
   if (allPairsContainer.childNodes.length <= 1) {
     const message = document.createElement('p');
-    message.className = 'text-center text-gray-500 py-2';
+    message.className = 'text-center text-gray-400 py-2';
     message.textContent = 'Niciun jucător nu a format perechi încă.';
     allPairsContainer.appendChild(message);
   }
+}
+
+// Simple sound effects function
+function playSound(type) {
+  // Only implement if needed, could be a distraction
+  // This is a placeholder for potential sound effects
+}
+
+// Add a helper function to request other players' cards info
+function requestOtherPlayersCards() {
+  if (gameState.socket) {
+    gameState.socket.emit('getPlayersCards');
+  }
+}
+
+// Add a function to handle card rearrangement
+function setupCardDragging() {
+  // Only enable dragging of your own cards when the deck is empty
+  if (!gameState.myCards || gameState.myCards.length <= 1) return;
+  
+  const cardElements = document.querySelectorAll('#player-cards .card');
+  cardElements.forEach((card, index) => {
+    card.setAttribute('draggable', 'true');
+    card.dataset.index = index;
+    
+    // Add drag start event
+    card.addEventListener('dragstart', function(e) {
+      gameState.isDragging = true;
+      gameState.draggedCardIndex = parseInt(this.dataset.index);
+      
+      this.classList.add('dragging');
+      
+      // Set data for drag operation
+      e.dataTransfer.setData('text/plain', this.dataset.index);
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    
+    // Add dragover event to show where the card will be dropped
+    card.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      
+      const draggedIndex = gameState.draggedCardIndex;
+      const targetIndex = parseInt(this.dataset.index);
+      
+      if (draggedIndex !== targetIndex) {
+        // Update the visual feedback
+        cardElements.forEach(c => c.classList.remove('drag-over', 'drag-before', 'drag-after'));
+        
+        if (targetIndex < draggedIndex) {
+          this.classList.add('drag-over', 'drag-before');
+        } else {
+          this.classList.add('drag-over', 'drag-after');
+        }
+      }
+    });
+    
+    // Add drop event to rearrange cards
+    card.addEventListener('drop', function(e) {
+      e.preventDefault();
+      
+      // Get the indices
+      const fromIndex = gameState.draggedCardIndex;
+      const toIndex = parseInt(this.dataset.index);
+      
+      if (fromIndex === null || toIndex === null || fromIndex === toIndex) {
+        // Cleanup visual feedback
+        cardElements.forEach(c => c.classList.remove('drag-over', 'drag-before', 'drag-after'));
+        return;
+      }
+      
+      console.log(`Attempting to drop card from index ${fromIndex} to index ${toIndex}`);
+      
+      // Create an array representing the original indices [0, 1, 2, ...]
+      const originalIndices = Array.from({ length: gameState.myCards.length }, (_, i) => i);
+      
+      // Simulate the move to get the new order of original indices
+      const movedIndex = originalIndices.splice(fromIndex, 1)[0];
+      originalIndices.splice(toIndex, 0, movedIndex);
+      
+      // The resulting array `originalIndices` is the `newOrder` the server expects
+      const newOrder = originalIndices;
+
+      console.log('Client sending newOrder:', newOrder);
+      
+      // Send the new order to the server
+      gameState.socket.emit('rearrangeCards', { newOrder: newOrder });
+
+      // Cleanup visual feedback immediately
+      cardElements.forEach(c => c.classList.remove('drag-over', 'drag-before', 'drag-after'));
+    });
+    
+    // Add dragend event to clean up
+    card.addEventListener('dragend', function() {
+      gameState.isDragging = false;
+      gameState.draggedCardIndex = null;
+      
+      this.classList.remove('dragging');
+      cardElements.forEach(c => c.classList.remove('drag-over', 'drag-before', 'drag-after'));
+    });
+  });
 }
 
 // Initialize the game when the page loads
